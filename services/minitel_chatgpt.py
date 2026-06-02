@@ -14,6 +14,7 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 
 sys.path.insert(0, str(Path(__file__).parent))
 from minitel_serial import MinitelSerial
+from jim_animation import play_mitterrand_intro, play_interlude
 
 ANTHROPIC_KEY = os.environ["ANTHROPIC_KEY"]
 MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
@@ -87,6 +88,16 @@ def run():
     prompt_label, system_prompt = load_system_prompt()
     log.info(f"Prompt chargé : '{prompt_label}'")
 
+    # ── Animation d'accueil style Mitterrand 1981 ──────────────────────────
+    try:
+        play_mitterrand_intro(m)
+        # Attendre que l'utilisateur appuie sur Entrée pour démarrer
+        m.read_line(echo=False, timeout=120)
+    except Exception as e:
+        log.warning(f"Animation d'accueil ignorée : {e}")
+        m.clear_screen()
+        m.cursor_home()
+
     m.clear_screen()
     m.cursor_home()
     m.send_text("=" * MAX_COLS + "\r\n")
@@ -108,8 +119,11 @@ def run():
         log.info(f"Entrée : {repr(user_input)}")
 
         if user_input.strip().upper() == "SOMMAIRE":
-            m.clear_screen()
-            m.cursor_home()
+            try:
+                play_interlude(m)
+            except Exception:
+                m.clear_screen()
+                m.cursor_home()
             continue
 
         history.append({"role": "user", "content": user_input})
