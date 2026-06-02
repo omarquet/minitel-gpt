@@ -1,0 +1,19 @@
+[Unit]
+Description=WiFi Manager — provisioning hotspot style IoT
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/home/minitel/minitel-gpt
+EnvironmentFile=/home/minitel/minitel-gpt/.env
+ExecStart=/usr/bin/python3 /home/minitel/minitel-gpt/services/wifi_manager.py
+# Si connexion OK → exit 0 → service terminé
+# Si hotspot lancé → Flask tourne jusqu'à connexion
+RemainAfterExit=no
+StandardOutput=append:/home/minitel/minitel-gpt/logs/wifi.log
+StandardError=append:/home/minitel/minitel-gpt/logs/wifi.log
+
+[Install]
+WantedBy=multi-user.target

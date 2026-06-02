@@ -1,0 +1,316 @@
+#!/usr/bin/env python3
+"""
+WiFi Manager — provisioning WiFi style IoT (Sonos/Chromecast).
+
+Comportement :
+  1. Au boot : tente de rejoindre un réseau connu (30s timeout)
+  2. Si échec : crée le hotspot MinitelGPT-Setup sur 192.168.4.1
+  3. Expose une page Web pour scanner et configurer un nouveau réseau
+  4. En cas de succès WiFi : coupe le hotspot, relance les services
+"""
+
+import os
+import sys
+import time
+import subprocess
+import threading
+import logging
+from pathlib import Path
+from flask import Flask, render_template_string, request, jsonify, redirect
+
+AP_SSID = "MinitelGPT-Setup"
+AP_PASSWORD = "minitelgpt"  # WPA2, min 8 chars
+AP_IP = "192.168.4.1"
+AP_CON_NAME = "MinitelGPT-AP"
+CONNECT_TIMEOUT = 30  # secondes pour rejoindre un réseau connu
+FLASK_PORT = 80
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [wifi-manager] %(levelname)s %(message)s",
+    handlers=[
+        logging.FileHandler("/home/minitel/minitel-gpt/logs/wifi.log"),
+        logging.StreamHandler(sys.stdout),
+    ],
+)
+log = logging.getLogger(__name__)
+
+app = Flask(__name__)
+
+# ── Utilitaires nmcli ──────────────────────────────────────────────────────
+
+def run(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess:
+    log.debug(f"$ {' '.join(cmd)}")
+    return subprocess.run(cmd, capture_output=True, text=True, check=check)
+
+
+def is_connected() -> str | None:
+    """Retourne l'IP wlan0 si connecté, None sinon."""
+    try:
+        out = run(["ip", "-4", "addr", "show", "wlan0"]).stdout
+        for line in out.splitlines():
+            if "inet " in line:
+                return line.strip().split()[1].split("/")[0]
+    except Exception:
+        pass
+    return None
+
+
+def hotspot_active() -> bool:
+    r = run(["nmcli", "-t", "-f", "NAME,STATE", "con", "show", "--active"], check=False)
+    return AP_CON_NAME in r.stdout
+
+
+def scan_networks() -> list[dict]:
+    run(["nmcli", "dev", "wifi", "rescan"], check=False)
+    time.sleep(2)
+    r = run(["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY,IN-USE", "dev", "wifi", "list"], check=False)
+    networks = []
+    seen = set()
+    for line in r.stdout.splitlines():
+        parts = line.split(":")
+        if len(parts) < 4:
+            continue
+        ssid = parts[0].strip()
+        if not ssid or ssid == AP_SSID or ssid in seen:
+            continue
+        seen.add(ssid)
+        networks.append({
+            "ssid": ssid,
+            "signal": int(parts[1]) if parts[1].isdigit() else 0,
+            "security": parts[2] or "Open",
+            "connected": parts[3] == "*",
+        })
+    return sorted(networks, key=lambda n: -n["signal"])
+
+
+def create_hotspot():
+    log.info(f"Création hotspot {AP_SSID}")
+    # Supprimer une éventuelle connexion précédente
+    run(["nmcli", "con", "delete", AP_CON_NAME], check=False)
+    run([
+        "nmcli", "con", "add",
+        "type", "wifi",
+        "ifname", "wlan0",
+        "mode", "ap",
+        "con-name", AP_CON_NAME,
+        "ssid", AP_SSID,
+        "802-11-wireless.band", "bg",
+        "802-11-wireless.channel", "6",
+        "wifi-sec.key-mgmt", "wpa-psk",
+        "wifi-sec.psk", AP_PASSWORD,
+        "ipv4.method", "shared",
+        "ipv4.addresses", f"{AP_IP}/24",
+        "ipv6.method", "disabled",
+        "autoconnect", "no",
+    ], check=True)
+    run(["nmcli", "con", "up", AP_CON_NAME], check=True)
+    log.info(f"Hotspot actif sur {AP_IP}")
+
+
+def stop_hotspot():
+    log.info("Arrêt hotspot")
+    run(["nmcli", "con", "down", AP_CON_NAME], check=False)
+
+
+def connect_wifi(ssid: str, password: str) -> tuple[bool, str]:
+    """Tente de connecter à un réseau. Retourne (succès, ip_ou_erreur)."""
+    log.info(f"Connexion WiFi → {ssid}")
+    stop_hotspot()
+    time.sleep(1)
+
+    # Supprimer un profil existant avec le même SSID pour repartir propre
+    r = run(["nmcli", "-t", "-f", "NAME,TYPE", "con", "show"], check=False)
+    for line in r.stdout.splitlines():
+        parts = line.split(":")
+        if len(parts) >= 2 and parts[0] == ssid and "wireless" in parts[1]:
+            run(["nmcli", "con", "delete", ssid], check=False)
+            break
+
+    cmd = ["nmcli", "dev", "wifi", "connect", ssid, "ifname", "wlan0"]
+    if password:
+        cmd += ["password", password]
+
+    result = run(cmd, check=False)
+    if result.returncode != 0:
+        log.error(f"nmcli connect échoué : {result.stderr}")
+        create_hotspot()
+        return False, result.stderr.strip()
+
+    # Attendre l'IP
+    for _ in range(15):
+        ip = is_connected()
+        if ip:
+            log.info(f"Connecté à {ssid} — IP {ip}")
+            return True, ip
+        time.sleep(2)
+
+    create_hotspot()
+    return False, "Timeout — pas d'IP obtenue"
+
+
+def try_known_networks(timeout: int = CONNECT_TIMEOUT) -> bool:
+    log.info("Recherche réseaux connus...")
+    start = time.time()
+    while time.time() - start < timeout:
+        if is_connected():
+            log.info(f"Déjà connecté : {is_connected()}")
+            return True
+        time.sleep(3)
+    return False
+
+
+# ── Interface Web ──────────────────────────────────────────────────────────
+
+HTML = """<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MinitelGPT — Configuration WiFi</title>
+<style>
+  body { font-family: monospace; background: #1a1a2e; color: #e0e0e0; margin: 0; padding: 20px; }
+  h1 { color: #00ff88; font-size: 1.4em; }
+  .card { background: #16213e; border: 1px solid #0f3460; border-radius: 8px; padding: 16px; margin: 12px 0; }
+  .network { cursor: pointer; padding: 10px; border-radius: 4px; margin: 4px 0; border: 1px solid #0f3460; }
+  .network:hover { background: #0f3460; }
+  .network.selected { border-color: #00ff88; }
+  .signal { float: right; color: #888; }
+  .security { font-size: 0.8em; color: #aaa; }
+  input[type=password] { width: 100%; padding: 8px; background: #0f3460; border: 1px solid #00ff88;
+    color: #e0e0e0; border-radius: 4px; box-sizing: border-box; margin-top: 8px; font-family: monospace; }
+  button { background: #00ff88; color: #1a1a2e; border: none; padding: 10px 24px;
+    border-radius: 4px; cursor: pointer; font-weight: bold; margin-top: 10px; font-size: 1em; }
+  button:hover { background: #00cc66; }
+  .status { padding: 10px; border-radius: 4px; margin: 8px 0; }
+  .ok { background: #0d3320; color: #00ff88; border: 1px solid #00ff88; }
+  .err { background: #330d0d; color: #ff4444; border: 1px solid #ff4444; }
+  #spinner { display: none; color: #aaa; margin-top: 8px; }
+</style>
+</head>
+<body>
+<h1>🖥 MinitelGPT — Configuration WiFi</h1>
+
+{% if status_msg %}
+<div class="status {{ 'ok' if status_ok else 'err' }}">{{ status_msg }}</div>
+{% endif %}
+
+<div class="card">
+<b>Réseaux disponibles</b> — <a href="/" style="color:#888;font-size:0.85em">Rafraîchir</a>
+<div id="networks">
+{% for net in networks %}
+<div class="network" onclick="selectNet('{{ net.ssid }}')" id="net-{{ loop.index }}">
+  {{ net.ssid }}
+  <span class="signal">📶 {{ net.signal }}%</span><br>
+  <span class="security">{{ net.security }}</span>
+  {% if net.connected %}<span style="color:#00ff88"> ✓ connecté</span>{% endif %}
+</div>
+{% endfor %}
+{% if not networks %}<p style="color:#888">Aucun réseau détecté</p>{% endif %}
+</div>
+</div>
+
+<div class="card">
+<form id="wifiForm" onsubmit="connectWifi(event)">
+  <b>Réseau sélectionné :</b> <span id="selectedSSID" style="color:#00ff88">—</span>
+  <input type="hidden" id="ssid" name="ssid">
+  <input type="password" id="password" name="password" placeholder="Mot de passe WiFi" autocomplete="off">
+  <br>
+  <button type="submit">Se connecter</button>
+  <div id="spinner">⏳ Connexion en cours (30s max)...</div>
+</form>
+</div>
+
+<script>
+function selectNet(ssid) {
+  document.getElementById('selectedSSID').textContent = ssid;
+  document.getElementById('ssid').value = ssid;
+  document.querySelectorAll('.network').forEach(el => el.classList.remove('selected'));
+  event.currentTarget.classList.add('selected');
+  document.getElementById('password').focus();
+}
+async function connectWifi(e) {
+  e.preventDefault();
+  const ssid = document.getElementById('ssid').value;
+  if (!ssid) { alert('Sélectionnez un réseau'); return; }
+  document.getElementById('spinner').style.display = 'block';
+  const resp = await fetch('/connect', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ssid, password: document.getElementById('password').value})
+  });
+  const data = await resp.json();
+  document.getElementById('spinner').style.display = 'none';
+  if (data.success) {
+    document.body.innerHTML = '<div style="padding:40px;color:#00ff88;font-family:monospace">'
+      + '<h2>✓ Connecté !</h2><p>IP : <b>' + data.ip + '</b></p>'
+      + '<p>Le Pi rejoint ' + ssid + '<br>Vous pouvez refermer cette page.</p></div>';
+  } else {
+    alert('Échec : ' + data.error);
+  }
+}
+</script>
+</body>
+</html>"""
+
+
+@app.route("/")
+def index():
+    networks = scan_networks()
+    return render_template_string(HTML, networks=networks, status_msg=None, status_ok=False)
+
+
+@app.route("/connect", methods=["POST"])
+def connect():
+    data = request.json or {}
+    ssid = data.get("ssid", "").strip()
+    password = data.get("password", "").strip()
+
+    if not ssid:
+        return jsonify(success=False, error="SSID manquant")
+
+    def do_connect():
+        success, result = connect_wifi(ssid, password)
+        if success:
+            # Relancer les services applicatifs
+            subprocess.run(["systemctl", "start", "minitel-chatgpt"], check=False)
+            subprocess.run(["systemctl", "start", "boot-notify"], check=False)
+
+    threading.Thread(target=do_connect, daemon=True).start()
+
+    # Attendre un peu et vérifier
+    time.sleep(20)
+    ip = is_connected()
+    if ip:
+        return jsonify(success=True, ip=ip)
+    return jsonify(success=False, error="Connexion échouée — réessayez")
+
+
+@app.route("/status")
+def status():
+    ip = is_connected()
+    return jsonify(connected=bool(ip), ip=ip, hotspot=hotspot_active())
+
+
+# ── Point d'entrée principal ───────────────────────────────────────────────
+
+def main():
+    log.info("=== WiFi Manager démarré ===")
+
+    # Si déjà connecté : rien à faire
+    if try_known_networks(timeout=CONNECT_TIMEOUT):
+        ip = is_connected()
+        log.info(f"Connecté au réseau connu. IP : {ip}")
+        sys.exit(0)
+
+    # Aucun réseau connu → hotspot
+    log.info("Aucun réseau connu. Lancement hotspot...")
+    create_hotspot()
+
+    log.info(f"Interface Web sur http://{AP_IP}")
+    # Lancer Flask (port 80 nécessite root)
+    app.run(host="0.0.0.0", port=FLASK_PORT, debug=False, use_reloader=False)
+
+
+if __name__ == "__main__":
+    main()
