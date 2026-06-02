@@ -14,7 +14,9 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 
 RESEND_API_KEY = os.environ["RESEND_API_KEY"]
 MAIL_TO = os.environ["MAIL_TO"]
-FROM_EMAIL = "noreply@previsio-ai.com"
+# Utiliser un domaine vérifié dans ton compte Resend (resend.com/domains)
+# En attendant : onboarding@resend.dev fonctionne pour envoyer à jerome@herard.com
+FROM_EMAIL = os.getenv("RESEND_FROM", "onboarding@resend.dev")
 HOSTNAME = socket.gethostname()
 
 
@@ -54,6 +56,7 @@ def send_email(ip: str):
         headers={
             "Authorization": f"Bearer {RESEND_API_KEY}",
             "Content-Type": "application/json",
+            "User-Agent": "minitel-gpt/1.0",
         },
         json={
             "from": FROM_EMAIL,
