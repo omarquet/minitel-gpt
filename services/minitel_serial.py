@@ -8,7 +8,15 @@ import sys
 from pathlib import Path
 
 # Minitel : 1200 baud, 7 bits, parité paire, 1 stop bit (norme Videotex)
-SERIAL_PORT = "/dev/ttyAMA0"
+# Détection automatique : FTDI (ttyUSB0) prioritaire sur GPIO UART (ttyAMA0)
+import os as _os
+def _detect_port() -> str:
+    for p in ["/dev/ttyUSB0", "/dev/ttyUSB1", "/dev/ttyAMA0", "/dev/serial0"]:
+        if _os.path.exists(p):
+            return p
+    return "/dev/ttyAMA0"
+
+SERIAL_PORT = _detect_port()
 BAUD_RATE = 1200
 BYTESIZE = serial.SEVENBITS
 PARITY = serial.PARITY_EVEN
