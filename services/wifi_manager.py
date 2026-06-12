@@ -37,6 +37,33 @@ log = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
+
+# ── Portail captif ──────────────────────────────────────────────────────────
+# Quand le hotspot est actif, on redirige toute requête (et les sondes de
+# détection des OS) vers le portail, pour qu'il s'ouvre automatiquement.
+CAPTIVE_PROBES = (
+    "/generate_204", "/gen_204", "/ncsi.txt", "/connecttest.txt",
+    "/hotspot-detect.html", "/library/test/success.html",
+    "/canonical.html", "/success.txt", "/redirect",
+)
+
+@app.before_request
+def captive_redirect():
+    from flask import request, redirect as _redir
+    host = request.host.split(":")[0]
+    path = request.path
+    # Si on est en hotspot et que la requête ne vise pas déjà notre IP,
+    # ou que c'est une sonde de détection captive → renvoyer vers le portail.
+    if host != AP_IP and path != "/connect":
+        try:
+            if hotspot_active():
+                return _redir(f"http://{AP_IP}/", code=302)
+        except Exception:
+            pass
+    if path in CAPTIVE_PROBES:
+        return _redir(f"http://{AP_IP}/", code=302)
+
+
 # ── Utilitaires nmcli ──────────────────────────────────────────────────────
 
 def run(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess:
@@ -59,6 +86,20 @@ def is_connected() -> str | None:
 def hotspot_active() -> bool:
     r = run(["nmcli", "-t", "-f", "NAME,STATE", "con", "show", "--active"], check=False)
     return AP_CON_NAME in r.stdout
+
+
+def client_connected() -> str | None:
+    """
+    Retourne le nom du réseau CLIENT actif sur wlan0 (hors hotspot), ou None.
+    Distingue une vraie connexion WiFi d'un hotspot : en mode AP, wlan0 a aussi
+    une IP (192.168.4.1) mais ce n'est PAS une connexion client.
+    """
+    r = run(["nmcli", "-t", "-f", "NAME,DEVICE", "con", "show", "--active"], check=False)
+    for line in r.stdout.splitlines():
+        p = line.split(":")
+        if len(p) >= 2 and p[1] == "wlan0" and p[0] != AP_CON_NAME:
+            return p[0]
+    return None
 
 
 def scan_networks() -> list[dict]:
@@ -145,21 +186,31 @@ def connect_wifi(ssid: str, password: str) -> tuple[bool, str]:
     stop_hotspot()
     time.sleep(1)
 
-    # Supprimer un profil existant avec le même SSID pour repartir propre
-    r = run(["nmcli", "-t", "-f", "NAME,TYPE", "con", "show"], check=False)
-    for line in r.stdout.splitlines():
-        parts = line.split(":")
-        if len(parts) >= 2 and parts[0] == ssid and "wireless" in parts[1]:
-            run(["nmcli", "con", "delete", ssid], check=False)
-            break
+    # Supprimer TOUS les profils existants ayant ce SSID (recherche par SSID,
+    # pas par nom : un profil 'Verrieres' peut porter le SSID 'Freebox-XXX').
+    r = run(["nmcli", "-t", "-f", "NAME", "con", "show"], check=False)
+    for name in r.stdout.splitlines():
+        name = name.strip()
+        if not name:
+            continue
+        s = run(["nmcli", "-t", "-f", "802-11-wireless.ssid", "con", "show", name],
+                check=False)
+        if f":{ssid}" in s.stdout.strip():
+            log.info(f"Suppression du profil existant '{name}' (SSID {ssid})")
+            run(["nmcli", "con", "delete", name], check=False)
 
-    cmd = ["nmcli", "dev", "wifi", "connect", ssid, "ifname", "wlan0"]
+    # Créer le profil explicitement avec le bon type de sécurité
+    add_cmd = ["nmcli", "con", "add", "type", "wifi", "ifname", "wlan0",
+               "con-name", ssid, "ssid", ssid,
+               "ipv4.method", "auto", "autoconnect", "yes"]
     if password:
-        cmd += ["password", password]
+        add_cmd += ["wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", password]
+    run(add_cmd, check=False)
 
-    result = run(cmd, check=False)
+    result = run(["nmcli", "con", "up", ssid], check=False)
     if result.returncode != 0:
-        log.error(f"nmcli connect échoué : {result.stderr}")
+        log.error(f"nmcli connect échoué : {result.stderr.strip()}")
+        run(["nmcli", "con", "delete", ssid], check=False)  # nettoyer le profil raté
         create_hotspot()
         return False, result.stderr.strip()
 
@@ -260,20 +311,19 @@ async function connectWifi(e) {
   const ssid = document.getElementById('ssid').value;
   if (!ssid) { alert('Sélectionnez un réseau'); return; }
   document.getElementById('spinner').style.display = 'block';
-  const resp = await fetch('/connect', {
+  // On envoie la demande SANS attendre la fin (le hotspot va se couper).
+  fetch('/connect', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({ssid, password: document.getElementById('password').value})
-  });
-  const data = await resp.json();
-  document.getElementById('spinner').style.display = 'none';
-  if (data.success) {
-    document.body.innerHTML = '<div style="padding:40px;color:#00ff88;font-family:monospace">'
-      + '<h2>✓ Connecté !</h2><p>IP : <b>' + data.ip + '</b></p>'
-      + '<p>Le Pi rejoint ' + ssid + '<br>Vous pouvez refermer cette page.</p></div>';
-  } else {
-    alert('Échec : ' + data.error);
-  }
+  }).catch(()=>{});
+  // Confirmation immédiate, affichée AVANT que le hotspot se ferme.
+  document.body.innerHTML = '<div style="padding:40px;color:#00ff88;font-family:monospace;text-align:center">'
+    + '<h2>&#10003; Configuration enregistree !</h2>'
+    + '<p>Le Minitel se connecte a <b>' + ssid + '</b>.</p>'
+    + '<p>Ce reseau de configuration va se fermer dans quelques secondes.<br>'
+    + 'Reconnectez votre telephone a votre WiFi habituel.</p>'
+    + '<p style="color:#aaa;margin-top:20px">Vous recevrez un email avec la nouvelle adresse du Minitel.</p></div>';
 }
 </script>
 </body>
@@ -296,20 +346,19 @@ def connect():
         return jsonify(success=False, error="SSID manquant")
 
     def do_connect():
+        # Laisser le temps à la page de confirmation de s'afficher avant de
+        # couper le hotspot (sinon le client perd la connexion avant de la voir).
+        time.sleep(3)
         success, result = connect_wifi(ssid, password)
         if success:
-            # Relancer les services applicatifs
             subprocess.run(["systemctl", "start", "minitel-chatgpt"], check=False)
             subprocess.run(["systemctl", "start", "boot-notify"], check=False)
+        else:
+            log.warning(f"Connexion à {ssid} échouée : {result}")
 
     threading.Thread(target=do_connect, daemon=True).start()
-
-    # Attendre un peu et vérifier
-    time.sleep(20)
-    ip = is_connected()
-    if ip:
-        return jsonify(success=True, ip=ip)
-    return jsonify(success=False, error="Connexion échouée — réessayez")
+    # Réponse immédiate : la confirmation s'affiche tout de suite, AVANT la bascule.
+    return jsonify(success=True, ssid=ssid)
 
 
 @app.route("/status")
@@ -334,18 +383,22 @@ def monitor_loop():
     log.info("=== WiFi Manager (surveillance continue) démarré ===")
     disconnected = 0
     while True:
-        ip = is_connected()
-        if ip:
+        client = client_connected()   # réseau CLIENT réel (pas le hotspot)
+        if client:
+            # Connecté à un vrai réseau WiFi
             if disconnected or hotspot_active():
-                log.info(f"Connecté : {ip}")
+                log.info(f"Connecté à '{client}' → arrêt du hotspot si actif")
             disconnected = 0
             if hotspot_active():
-                log.info("Connexion rétablie → arrêt du hotspot")
                 stop_hotspot()
+        elif hotspot_active():
+            # En mode hotspot : on y reste (attente config via le portail)
+            disconnected = 0
         else:
+            # Ni client, ni hotspot → on compte avant de basculer
             disconnected += 1
             log.info(f"Déconnecté ({disconnected}/{GRACE_CYCLES})")
-            if disconnected >= GRACE_CYCLES and not hotspot_active():
+            if disconnected >= GRACE_CYCLES:
                 log.info("Aucun réseau → bascule en hotspot MinitelGPT-Setup")
                 try:
                     create_hotspot()
