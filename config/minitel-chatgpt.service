@@ -1,6 +1,6 @@
 [Unit]
-Description=Minitel ChatGPT (Claude)
-After=network-online.target wifi-manager.service
+Description=MINITEL GPT
+After=network-online.target
 Wants=network-online.target
 
 [Service]
@@ -9,8 +9,8 @@ User=minitel
 WorkingDirectory=/home/minitel/minitel-gpt
 EnvironmentFile=/home/minitel/minitel-gpt/.env
 ExecStart=/usr/bin/python3 /home/minitel/minitel-gpt/services/minitel_chatgpt.py
-Restart=on-failure
-RestartSec=10
+Restart=always
+RestartSec=5
 StandardOutput=append:/home/minitel/minitel-gpt/logs/chatgpt.log
 StandardError=append:/home/minitel/minitel-gpt/logs/chatgpt.log
 
