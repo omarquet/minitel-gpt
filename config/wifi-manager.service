@@ -4,14 +4,13 @@ After=NetworkManager.service
 Wants=NetworkManager.service
 
 [Service]
-Type=oneshot
+Type=simple
 User=root
 WorkingDirectory=/home/minitel/minitel-gpt
 EnvironmentFile=/home/minitel/minitel-gpt/.env
 ExecStart=/usr/bin/python3 /home/minitel/minitel-gpt/services/wifi_manager.py
-# Si connexion OK → exit 0 → service terminé
-# Si hotspot lancé → Flask tourne jusqu'à connexion
-RemainAfterExit=no
+Restart=always
+RestartSec=10
 StandardOutput=append:/home/minitel/minitel-gpt/logs/wifi.log
 StandardError=append:/home/minitel/minitel-gpt/logs/wifi.log
 

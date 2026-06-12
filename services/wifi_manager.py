@@ -292,24 +292,52 @@ def status():
     return jsonify(connected=bool(ip), ip=ip, hotspot=hotspot_active())
 
 
-# ── Point d'entrée principal ───────────────────────────────────────────────
+# ── Surveillance continue ──────────────────────────────────────────────────
+CHECK_INTERVAL = 30        # secondes entre deux vérifications
+GRACE_CYCLES = 4           # cycles déconnectés avant hotspot (~2 min)
+
+
+def monitor_loop():
+    """
+    Surveille la connexion en permanence.
+    - Connecté : s'assure que le hotspot est coupé.
+    - Déconnecté plus de GRACE_CYCLES cycles : bascule en hotspot de provisioning.
+    Le portail web (Flask) tourne en permanence en parallèle (port 80),
+    accessible aussi bien via le WiFi que via le hotspot.
+    """
+    log.info("=== WiFi Manager (surveillance continue) démarré ===")
+    disconnected = 0
+    while True:
+        ip = is_connected()
+        if ip:
+            if disconnected or hotspot_active():
+                log.info(f"Connecté : {ip}")
+            disconnected = 0
+            if hotspot_active():
+                log.info("Connexion rétablie → arrêt du hotspot")
+                stop_hotspot()
+        else:
+            disconnected += 1
+            log.info(f"Déconnecté ({disconnected}/{GRACE_CYCLES})")
+            if disconnected >= GRACE_CYCLES and not hotspot_active():
+                log.info("Aucun réseau → bascule en hotspot MinitelGPT-Setup")
+                try:
+                    create_hotspot()
+                    log.info(f"Hotspot actif — portail http://{AP_IP}")
+                except Exception as e:
+                    log.error(f"Échec création hotspot : {e}")
+        time.sleep(CHECK_INTERVAL)
+
 
 def main():
-    log.info("=== WiFi Manager démarré ===")
-
-    # Si déjà connecté : rien à faire
-    if try_known_networks(timeout=CONNECT_TIMEOUT):
-        ip = is_connected()
-        log.info(f"Connecté au réseau connu. IP : {ip}")
-        sys.exit(0)
-
-    # Aucun réseau connu → hotspot
-    log.info("Aucun réseau connu. Lancement hotspot...")
-    create_hotspot()
-
-    log.info(f"Interface Web sur http://{AP_IP}")
-    # Lancer Flask (port 80 nécessite root)
-    app.run(host="0.0.0.0", port=FLASK_PORT, debug=False, use_reloader=False)
+    # Portail web en permanence (thread daemon) : configuration WiFi accessible
+    # depuis le hotspot (192.168.4.1) ou depuis le réseau local.
+    threading.Thread(
+        target=lambda: app.run(host="0.0.0.0", port=FLASK_PORT,
+                               debug=False, use_reloader=False),
+        daemon=True,
+    ).start()
+    monitor_loop()
 
 
 if __name__ == "__main__":
