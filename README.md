@@ -108,7 +108,7 @@ tail -f logs/chatgpt.log                  # logs
 
 ## Interface d'administration
 
-`http://<ip-du-pi>:8080` — mot de passe par défaut **13100** (`ADMIN_PASSWORD`).
+`http://<ip-du-pi>:8080` — mot de passe par défaut **mistral** (`ADMIN_PASSWORD`).
 
 Trois onglets :
 - **Tableau de bord** : état des services, activation des personnalités

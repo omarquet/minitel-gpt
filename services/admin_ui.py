@@ -20,7 +20,7 @@ PROMPTS_FILE = PROJ_DIR / "config" / "prompts.json"
 KNOWLEDGE_DIR = PROJ_DIR / "config" / "knowledge"
 ENV_FILE = PROJ_DIR / ".env"
 LOGS_DIR = PROJ_DIR / "logs"
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "13100")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "mistral")
 SECRET_KEY = os.getenv("FLASK_SECRET", "minitel-secret-1985")
 
 DEFAULTS = {

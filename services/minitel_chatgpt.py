@@ -271,7 +271,7 @@ def show_guide(t: Term):
     else:
         t.center("Adresse IP indisponible")
     t.w(bytes([CR, LF, CR, LF]))
-    t.center("Mot de passe : 13100")
+    t.center(f"Mot de passe : {os.getenv('ADMIN_PASSWORD', 'mistral')}")
     t.w(bytes([CR, LF, CR, LF, CR, LF]))
     t.w(FG_CYAN); t.center("Une touche pour revenir")
     t.read_key(120)
