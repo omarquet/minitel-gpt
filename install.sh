@@ -1,53 +1,59 @@
 #!/bin/bash
-# install.sh — Setup complet MinitelGPT sur Raspberry Pi Zero 2 W
+# install.sh — Installation complète de MINITEL GPT sur Raspberry Pi
 # Usage : sudo bash install.sh
-
 set -e
+
 PROJ_DIR="/home/minitel/minitel-gpt"
 SERVICE_DIR="/etc/systemd/system"
 
-echo "=== MinitelGPT Install ==="
+echo "=== MINITEL GPT — Installation ==="
 
-# ── Dépendances système ────────────────────────────────────────────────────
-echo "[1/5] Dépendances système..."
+# ── Dépendances système ─────────────────────────────────────────────────────
+echo "[1/6] Paquets système..."
 apt-get update -q
-apt-get install -y python3-serial python3-requests python3-flask \
-  python3-dotenv dnsmasq minicom
+apt-get install -y \
+  python3-serial python3-requests python3-flask python3-dotenv \
+  dnsmasq-base iw minicom
 
-# ── Dépendances Python ────────────────────────────────────────────────────
-echo "[2/5] Dépendances Python..."
-python3 -m pip install anthropic --break-system-packages
+# ── Dépendances Python ──────────────────────────────────────────────────────
+echo "[2/6] Paquets Python..."
+python3 -m pip install pyfiglet --break-system-packages
 
-# ── Permissions UART ──────────────────────────────────────────────────────
-echo "[3/5] Permissions UART..."
+# ── Désactiver le dnsmasq système (conflit port 53 avec le hotspot) ─────────
+echo "[3/6] Nettoyage dnsmasq système..."
+systemctl disable --now dnsmasq 2>/dev/null || true
+
+# ── Permissions port série + répertoires ────────────────────────────────────
+echo "[4/6] Permissions et répertoires..."
 usermod -a -G dialout minitel
-
-# ── Répertoires et logs ───────────────────────────────────────────────────
-echo "[4/5] Répertoires..."
-mkdir -p "$PROJ_DIR/logs"
+mkdir -p "$PROJ_DIR/logs" "$PROJ_DIR/config/knowledge"
 chown -R minitel:minitel "$PROJ_DIR"
 
-# ── Services systemd ──────────────────────────────────────────────────────
-echo "[5/5] Services systemd..."
-cp "$PROJ_DIR/config/wifi-manager.service" "$SERVICE_DIR/"
-cp "$PROJ_DIR/config/boot-notify.service" "$SERVICE_DIR/"
-cp "$PROJ_DIR/config/minitel-chatgpt.service" "$SERVICE_DIR/"
+# ── Règle sudo (l'admin web redémarre le terminal sans mot de passe) ────────
+echo "[5/6] Règle sudo..."
+cp "$PROJ_DIR/config/minitel-gpt-sudoers" /etc/sudoers.d/minitel-gpt
+chmod 440 /etc/sudoers.d/minitel-gpt
+visudo -c -f /etc/sudoers.d/minitel-gpt
 
+# ── Services systemd ────────────────────────────────────────────────────────
+echo "[6/6] Services systemd..."
+cp "$PROJ_DIR/config/minitel-chatgpt.service" "$SERVICE_DIR/"
+cp "$PROJ_DIR/config/wifi-manager.service"    "$SERVICE_DIR/"
+cp "$PROJ_DIR/config/admin-ui.service"        "$SERVICE_DIR/"
 systemctl daemon-reload
-systemctl enable wifi-manager.service
-systemctl enable boot-notify.service
-systemctl enable minitel-chatgpt.service
+systemctl enable minitel-chatgpt.service wifi-manager.service admin-ui.service
 
 echo ""
 echo "=== Installation terminée ==="
 echo ""
-echo "IMPORTANT : créer le fichier .env avant de démarrer :"
-echo "  cp $PROJ_DIR/config/env.example $PROJ_DIR/.env"
-echo "  nano $PROJ_DIR/.env"
+echo "1. Créer le fichier .env avec la clé Mistral :"
+echo "     cp $PROJ_DIR/config/env.example $PROJ_DIR/.env"
+echo "     nano $PROJ_DIR/.env      # renseigner MISTRAL_KEY"
 echo ""
-echo "Puis démarrer les services :"
-echo "  systemctl start boot-notify"
-echo "  systemctl start minitel-chatgpt"
+echo "2. Démarrer les services :"
+echo "     sudo systemctl start minitel-chatgpt wifi-manager admin-ui"
 echo ""
-echo "Test UART loopback (pont pin8↔pin10 requis) :"
-echo "  python3 $PROJ_DIR/services/test_uart.py --loopback"
+echo "3. Admin web : http://<ip-du-pi>:8080   (mot de passe : mistral)"
+echo "   (l'IP s'affiche aussi sur le Minitel via la touche GUIDE)"
+echo ""
+echo "Côté Minitel : appuyer sur Fnct+T puis A (mode peri-informatique)."

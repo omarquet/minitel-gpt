@@ -3,8 +3,8 @@
 Transformer un **Minitel 1 Telic / Alcatel** en terminal de chat IA autonome,
 piloté par un **Raspberry Pi Zero 2 W**.
 
-On tape sa question sur le clavier du Minitel, le Pi interroge un modèle Claude
-(Anthropic) et affiche la réponse à l'écran, à 1200 bauds. La personnalité de
+On tape sa question sur le clavier du Minitel, le Pi interroge un modèle
+**Mistral** et affiche la réponse à l'écran, à 1200 bauds. La personnalité de
 l'assistant est configurable via une interface web (la version phare est
 « bloquée dans les années 80 »).
 
@@ -53,34 +53,34 @@ nano .env
 sudo bash install.sh
 ```
 
-Le script `install.sh` installe les dépendances (`pyserial`, `flask`,
-`python-dotenv`, `requests`, `anthropic`, `pyfiglet`, `dnsmasq-base`, `iw`),
-ajoute l'utilisateur au groupe `dialout`, et active les services systemd.
+Le script `install.sh` se charge de **tout** : paquets (`pyserial`, `flask`,
+`python-dotenv`, `requests`, `pyfiglet`, `dnsmasq-base`, `iw`), désactivation du
+`dnsmasq` système (conflit hotspot), groupe `dialout`, règle sudo, et activation
+des 3 services systemd.
 
 ### Fichier `.env`
 
 ```env
-ANTHROPIC_KEY=sk-ant-...
-CLAUDE_MODEL=claude-haiku-4-5-20251001
-RESEND_API_KEY=re_...
-MAIL_TO=vous@exemple.com
+MISTRAL_KEY=...
+MISTRAL_MODEL=mistral-small-latest
 ```
 
-> La clé Anthropic et l'email peuvent aussi être saisis depuis l'interface d'admin.
+> La clé Mistral peut aussi être saisie depuis l'interface d'admin
+> (onglet **Paramètres**). Crée-la sur https://console.mistral.ai/
 
-### Réglages système requis
+### Préparation de la carte SD (avant tout)
+
+Avec **Raspberry Pi Imager** : flasher **Raspberry Pi OS Lite (64-bit)**, et dans
+les réglages (⚙) : activer **SSH**, définir l'utilisateur **`minitel`** + mot de
+passe, et renseigner le **WiFi** initial. Le projet est entièrement *headless*
+(ni écran ni clavier sur le Pi).
+
+### Mettre à jour le code (après installation)
 
 ```bash
-# UART PL011 stable (si usage GPIO au lieu du FTDI) : /boot/firmware/config.txt
-#   enable_uart=1
-#   dtoverlay=disable-bt
-
-# Hotspot WiFi : désactiver le dnsmasq système (conflit port 53 avec NetworkManager)
-sudo systemctl disable --now dnsmasq
-
-# Autoriser l'admin web à redémarrer le terminal sans mot de passe
-sudo cp config/minitel-gpt-sudoers /etc/sudoers.d/minitel-gpt
-sudo chmod 440 /etc/sudoers.d/minitel-gpt
+cd /home/minitel/minitel-gpt
+git pull
+sudo systemctl restart minitel-chatgpt admin-ui wifi-manager
 ```
 
 ---
@@ -89,9 +89,8 @@ sudo chmod 440 /etc/sudoers.d/minitel-gpt
 
 | Service | Rôle |
 |---|---|
-| `minitel-chatgpt` | Terminal : lit le clavier Minitel, interroge Claude, affiche la réponse paginée |
+| `minitel-chatgpt` | Terminal : lit le clavier Minitel, interroge Mistral, affiche la réponse paginée |
 | `wifi-manager` | Connexion WiFi autonome + hotspot de provisioning (portail captif) |
-| `boot-notify` | Envoie l'IP du Pi par email au démarrage et après config WiFi |
 | `admin-ui` | Interface web d'administration (port 8080) |
 
 ```bash
@@ -113,10 +112,14 @@ tail -f logs/chatgpt.log                  # logs
 Trois onglets :
 - **Tableau de bord** : état des services, activation des personnalités
 - **Personnalités** : créer / modifier / supprimer des presets, génération de
-  prompt par IA, textes d'accueil personnalisables
-- **Paramètres** : clé Anthropic, email de notification, logs
+  prompt par IA, **fichiers de connaissance** (.txt) injectés dans le contexte,
+  textes d'accueil personnalisables
+- **Paramètres** : clé API Mistral, logs
 
-Les personnalités sont stockées dans `config/prompts.json`.
+Les personnalités sont stockées dans `config/prompts.json`, leurs fichiers de
+connaissance dans `config/knowledge/<personnalité>/`.
+
+L'adresse de l'admin est aussi consultable **sur le Minitel via la touche Guide**.
 
 ---
 
@@ -127,7 +130,7 @@ Les personnalités sont stockées dans `config/prompts.json`.
   `MinitelGPT-Setup`** (IP `192.168.4.1`).
 - Se connecter au hotspot ouvre automatiquement le **portail captif** :
   on choisit le réseau du lieu, le Pi s'y connecte et coupe le hotspot.
-- L'IP finale est envoyée par email (Resend).
+- L'IP du Pi est ensuite consultable sur le Minitel (touche **Guide**).
 
 ---
 
@@ -135,13 +138,13 @@ Les personnalités sont stockées dans `config/prompts.json`.
 
 ```
 services/
-  minitel_chatgpt.py   terminal (boucle de chat)
+  minitel_chatgpt.py   terminal (boucle de chat, appel Mistral)
   minitel_serial.py    abstraction série
-  wifi_manager.py      provisioning WiFi + portail
+  wifi_manager.py      provisioning WiFi + portail captif
   admin_ui.py          interface web d'admin
-  boot_notify.py       email d'IP au boot
 config/
   prompts.json         personnalités
+  knowledge/           fichiers .txt par personnalité
   *.service            unités systemd
   minitel-gpt-sudoers  règle sudo pour l'admin
 install.sh             installation
