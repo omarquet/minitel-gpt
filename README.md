@@ -32,8 +32,15 @@ l'assistant est configurable via une interface web (la version phare est
 Paramètres série : **1200 bauds, 7 bits, parité paire, 1 stop (7E1)** — norme Videotex.
 Le port apparaît côté Pi comme `/dev/ttyUSB0`.
 
-> **Activation du Minitel** : pour qu'il reçoive/affiche les données série, le
-> mettre en mode péri-informatique avec **Fnct + T** puis **A**.
+> **Mode péri-informatique** : sur la plupart des modèles (dont le Telic /
+> Alcatel 1), le port DIN reçoit et affiche les données **par défaut**, sans
+> aucune manipulation. Si rien ne s'affiche malgré un câblage correct, certains
+> modèles demandent de l'activer au clavier avec **Fnct + T** puis **A**.
+>
+> **Compatibilité entre modèles** : le brochage DIN ci-dessus est *normalisé*
+> (norme Télétel/STUM), donc identique sur tous les Minitels équipés de la prise
+> péri-informatique (1B, 2, Magis…). Ce qui peut varier d'un modèle à l'autre :
+> l'activation du mode (auto ou Fnct+T A) et la vitesse par défaut (1200/4800).
 
 ---
 
@@ -156,7 +163,8 @@ install.sh             installation
 
 | Symptôme | Cause probable |
 |---|---|
-| Rien ne s'affiche sur le Minitel | fil série délogé, ou Minitel pas en mode péri-info (Fnct+T A) |
+| Rien ne s'affiche sur le Minitel | fil série délogé (cause n°1), jumper FTDI pas sur 5 V, ou (selon modèle) mode péri-info à activer via Fnct+T A |
+| Charabia à l'écran | vitesse Pi ≠ vitesse Minitel (rester à 1200 bauds des deux côtés) |
 | Le hotspot n'apparaît pas | service `dnsmasq` système actif (port 53) → le désactiver |
 | Caractères doublés à la saisie | écho local du Minitel + écho logiciel (ne pas ré-écho côté Pi) |
 | Touches de fonction sans effet | un octet `0x13` isolé bloquait la lecture (corrigé) |
