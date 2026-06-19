@@ -57,8 +57,8 @@ Le port apparaît côté Pi comme `/dev/ttyUSB0`.
 >
 > **Compatibilité entre modèles** : le brochage DIN est *normalisé*
 > (norme Télétel/STUM), identique sur tous les Minitels à prise péri-informatique.
-> Le service reconnaît les touches de fonction en Vidéotex (`SEP`) **et** en
-> téléinformatique (VT100 `ESC O x`), et re-force le Vidéotex au besoin.
+> Le service reconnaît les touches de fonction aussi bien en Vidéotex (`SEP`)
+> qu'en téléinformatique (VT100 `ESC O x`), donc il fonctionne quel que soit le mode.
 
 ---
 
