@@ -195,11 +195,6 @@ class Term:
         self.s.write(data)
 
     def clear(self):
-        # Minitel 2 : force le standard Vidéotex (PRO2 « ESC : 2 ~ »). Annule le
-        # mode téléinformatique 80 col (défilant, sans pagination) activé par
-        # Fnct+T A. Sans effet si le Minitel est déjà en Vidéotex (ex. Minitel 1).
-        self.w(bytes([ESC, 0x3A, 0x32, 0x7E]))
-        time.sleep(0.1)
         self.w(bytes([FF, RS]))
         time.sleep(0.2)
 
