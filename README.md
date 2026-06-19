@@ -16,10 +16,16 @@ l'assistant est configurable via une interface web (la version phare est
 
 | Élément | Détail |
 |---|---|
-| Raspberry Pi Zero 2 W | Raspberry Pi OS Lite (Bookworm) |
+| Raspberry Pi Zero 2 W | Raspberry Pi OS Lite (Bookworm) — ou **Pi Zero W v1** (voir ci-dessous) |
 | Adaptateur USB-série | **FTDI FT232RL**, jumper sur **5 V** |
 | Câble | OTG micro-USB (FTDI → port USB *data* du Pi) |
 | Minitel | Telic / Alcatel 1, prise DIN 5 broches « péri-informatique » |
+
+> **Compatible Pi Zero W (v1, 2017)** : en cas de pénurie de Zero 2 W, le Zero W
+> d'origine fonctionne. Le LLM est appelé en HTTP (`requests`), sans dépendance
+> lourde à compiler — l'installation passe donc sur l'architecture ARMv6.
+> Flasher **Raspberry Pi OS Lite 32-bit**. Le CPU plus lent n'a quasi aucun impact :
+> l'affichage est de toute façon limité par la liaison série à 1200 bauds.
 
 ### Câblage série
 
