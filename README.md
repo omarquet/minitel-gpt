@@ -78,10 +78,18 @@ nano .env
 sudo bash install.sh
 ```
 
-Le script `install.sh` se charge de **tout** : paquets (`pyserial`, `flask`,
-`python-dotenv`, `requests`, `pyfiglet`, `dnsmasq-base`, `iw`), désactivation du
-`dnsmasq` système (conflit hotspot), groupe `dialout`, règle sudo, et activation
-des 3 services systemd.
+Le script `install.sh` se charge de **tout** :
+
+- paquets : `git`, `pyserial`, `flask`, `python-dotenv`, `requests`, `pyfiglet`,
+  `dnsmasq-base`, `iw` ;
+- désactivation du `dnsmasq` système (conflit hotspot) ;
+- groupe `dialout` (accès au port série FTDI) ;
+- création de `config/prompts.json` depuis `prompts.default.json` (s'il manque) ;
+- règle sudo (l'admin redémarre les services) ;
+- activation des 3 services systemd.
+
+> Le dossier est un **clone git**, ce qui permet la mise à jour en un clic depuis
+> l'admin (onglet **Paramètres**). Ne pas remplacer les fichiers à la main.
 
 ### Fichier `.env`
 
@@ -101,6 +109,12 @@ passe, et renseigner le **WiFi** initial. Le projet est entièrement *headless*
 (ni écran ni clavier sur le Pi).
 
 ### Mettre à jour le code (après installation)
+
+Le plus simple : depuis l'**admin web** → onglet **Paramètres** → *Vérifier les
+mises à jour* puis *Mettre à jour maintenant* (voir [Mise à jour depuis
+l'admin](#mise-à-jour-depuis-ladmin)).
+
+En ligne de commande, c'est équivalent à :
 
 ```bash
 cd /home/minitel/minitel-gpt
