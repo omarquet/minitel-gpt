@@ -54,6 +54,15 @@ MISTRAL_KEY = os.environ.get("MISTRAL_KEY", "")
 MODEL = os.getenv("MISTRAL_MODEL", "mistral-small-latest")
 MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions"
 PROMPTS_FILE = Path(__file__).parent.parent / "config" / "prompts.json"
+PROMPTS_DEFAULT = Path(__file__).parent.parent / "config" / "prompts.default.json"
+
+
+def ensure_prompts():
+    """prompts.json est local (gitignoré) : si absent (1er lancement / après une
+    mise à jour), on le crée depuis prompts.default.json fourni par le dépôt."""
+    if not PROMPTS_FILE.exists() and PROMPTS_DEFAULT.exists():
+        PROMPTS_FILE.write_text(PROMPTS_DEFAULT.read_text(encoding="utf-8"),
+                                encoding="utf-8")
 
 
 def call_mistral(system_prompt, history):
@@ -144,6 +153,7 @@ def load_preset():
     """Retourne (system, title_msg, question_msg, loading_msg).
     Le system inclut les fichiers de connaissance du preset s'il y en a."""
     try:
+        ensure_prompts()
         data = json.load(open(PROMPTS_FILE))
         key = data["active"]
         p = data["presets"][key]

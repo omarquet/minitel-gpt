@@ -17,6 +17,7 @@ from werkzeug.utils import secure_filename
 PROJ_DIR = Path(__file__).parent.parent
 ASSETS_DIR = PROJ_DIR / "assets"
 PROMPTS_FILE = PROJ_DIR / "config" / "prompts.json"
+PROMPTS_DEFAULT = PROJ_DIR / "config" / "prompts.default.json"
 KNOWLEDGE_DIR = PROJ_DIR / "config" / "knowledge"
 ENV_FILE = PROJ_DIR / ".env"
 LOGS_DIR = PROJ_DIR / "logs"
@@ -50,7 +51,15 @@ app = Flask(__name__)
 app.secret_key = SECRET_KEY
 
 # ── Helpers prompts ──────────────────────────────────────────────────────
+def ensure_prompts():
+    """prompts.json est local (gitignoré) : recréé depuis prompts.default.json
+    s'il est absent (1er lancement / après une mise à jour qui ne l'écrase pas)."""
+    if not PROMPTS_FILE.exists() and PROMPTS_DEFAULT.exists():
+        PROMPTS_FILE.write_text(PROMPTS_DEFAULT.read_text(encoding="utf-8"),
+                                encoding="utf-8")
+
 def load_prompts():
+    ensure_prompts()
     with open(PROMPTS_FILE) as f:
         return json.load(f)
 
@@ -142,6 +151,78 @@ def log_tail(name, n=40):
                               capture_output=True, text=True).stdout
     except Exception as e:
         return str(e)
+
+# ── Mise à jour de l'application (git) ────────────────────────────────────
+LAST_VERSION_FILE = PROJ_DIR / ".last_version"
+
+def git(*args, timeout=60):
+    """Exécute git dans le dossier projet. Retourne (rc, stdout, stderr)."""
+    try:
+        r = subprocess.run(["git", "-C", str(PROJ_DIR), *args],
+                           capture_output=True, text=True, timeout=timeout)
+        return r.returncode, r.stdout.strip(), r.stderr.strip()
+    except Exception as e:
+        return 1, "", str(e)
+
+def git_ready():
+    rc, out, _ = git("rev-parse", "--is-inside-work-tree")
+    return rc == 0 and out == "true"
+
+def current_version():
+    if not git_ready():
+        return "(non versionné)"
+    rc, out, _ = git("log", "-1", "--format=%h · %cd · %s",
+                     "--date=format:%d/%m/%Y %H:%M")
+    return out or "(inconnue)"
+
+def check_update():
+    """git fetch puis compare HEAD à origin/main. Retourne un dict."""
+    if not git_ready():
+        return {"ok": False, "msg": "Le code n'est pas un dépôt git sur le Pi."}
+    rc, _, err = git("fetch", "origin", "main")
+    if rc != 0:
+        return {"ok": False, "msg": "Échec de la vérification (Internet ?) : " + err}
+    rc, behind, _ = git("rev-list", "--count", "HEAD..origin/main")
+    n = int(behind) if behind.isdigit() else 0
+    _, log, _ = git("log", "--format=%h  %s", "HEAD..origin/main")
+    return {"ok": True, "behind": n, "log": log}
+
+def restart_all():
+    """Redémarre le terminal, puis l'admin de façon détachée (pour que la
+    réponse HTTP parte avant que ce process ne soit tué)."""
+    subprocess.run(["sudo", "systemctl", "restart", "minitel-chatgpt"],
+                   capture_output=True, text=True)
+    subprocess.Popen(["bash", "-c", "sleep 2; sudo systemctl restart admin-ui"],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
+
+def do_update():
+    """Met à jour le code depuis origin/main puis redémarre les services."""
+    if not git_ready():
+        return False, "Le code n'est pas un dépôt git sur le Pi."
+    rc, prev, _ = git("rev-parse", "HEAD")
+    rc, _, err = git("fetch", "origin", "main")
+    if rc != 0:
+        return False, "Échec fetch : " + err
+    rc, out, err = git("reset", "--hard", "origin/main")
+    if rc != 0:
+        return False, "Échec reset : " + (err or out)
+    if prev:
+        LAST_VERSION_FILE.write_text(prev)
+    ensure_prompts()
+    restart_all()
+    return True, out
+
+def do_rollback():
+    if not git_ready() or not LAST_VERSION_FILE.exists():
+        return False, "Aucune version précédente enregistrée."
+    prev = LAST_VERSION_FILE.read_text().strip()
+    rc, out, err = git("reset", "--hard", prev)
+    if rc != 0:
+        return False, "Échec : " + (err or out)
+    ensure_prompts()
+    restart_all()
+    return True, out
 
 # ── Génération de prompt par IA ──────────────────────────────────────────
 def generate_prompt(description):
@@ -353,6 +434,26 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     <p class=sub style=margin-top:10px>Adresse de l'admin : consultable sur le Minitel via la touche <b>Guide</b>.</p>
   </div>
   <div class=block>
+    <h2>🔄 Mise à jour de l'application</h2>
+    <p class=sub>Version installée : <b>{{version}}</b></p>
+    <form method=POST action=/check-update style=margin:0>
+      <button class="btn btn-s">Vérifier les mises à jour</button>
+    </form>
+    {% if update_log %}
+    <hr>
+    <p class=sub>Nouveautés disponibles :</p>
+    <pre>{{update_log}}</pre>
+    <form method=POST action=/update onsubmit="return confirm('Mettre à jour le code et redémarrer les services ?')">
+      <button class="btn btn-p">⬇ Mettre à jour maintenant</button>
+    </form>
+    {% endif %}
+    <hr>
+    <form method=POST action=/rollback onsubmit="return confirm('Revenir à la version précédente ?')" style=margin:0>
+      <button class="btn btn-d">↶ Revenir à la version précédente</button>
+    </form>
+    <p class=sub style=margin-top:8px>La mise à jour récupère le code depuis GitHub. Tes personnalités, clés et fichiers de connaissance ne sont pas touchés.</p>
+  </div>
+  <div class=block>
     <h2>Logs du terminal <a href=/ class=sub style=margin-left:8px>rafraîchir</a></h2>
     <pre>{{log_chatgpt}}</pre>
   </div>
@@ -458,6 +559,7 @@ def index():
         knowledge_json=json.dumps(all_knowledge()),
         active_key=data["active"], services=services, ip=ip_address(),
         log_chatgpt=log_tail("chatgpt"), key_masked=masked,
+        version=current_version(), update_log=session.pop("update_log", None),
         flash=flash, flash_ok=flash_ok)
 
 @app.route("/save-prompt", methods=["POST"])
@@ -607,6 +709,40 @@ def delete_knowledge():
 def restart():
     ok = restart_terminal()
     session["flash"] = "Terminal redémarré." if ok else "Échec (sudo requis)."
+    session["flash_ok"] = ok
+    return redirect(url_for("index"))
+
+@app.route("/check-update", methods=["POST"])
+@require_login
+def check_update_route():
+    res = check_update()
+    if not res["ok"]:
+        session["flash"] = res["msg"]; session["flash_ok"] = False
+    elif res["behind"] == 0:
+        session["flash"] = "L'application est à jour."; session["flash_ok"] = True
+        session.pop("update_log", None)
+    else:
+        session["update_log"] = res["log"]
+        session["flash"] = f"{res['behind']} mise(s) à jour disponible(s)."
+        session["flash_ok"] = True
+    return redirect(url_for("index"))
+
+@app.route("/update", methods=["POST"])
+@require_login
+def update_route():
+    ok, msg = do_update()
+    session.pop("update_log", None)
+    session["flash"] = ("Mise à jour appliquée — les services redémarrent (recharge la page dans ~10 s)."
+                        if ok else "Échec de la mise à jour : " + msg)
+    session["flash_ok"] = ok
+    return redirect(url_for("index"))
+
+@app.route("/rollback", methods=["POST"])
+@require_login
+def rollback_route():
+    ok, msg = do_rollback()
+    session["flash"] = ("Version précédente restaurée — redémarrage en cours."
+                        if ok else "Échec : " + msg)
     session["flash_ok"] = ok
     return redirect(url_for("index"))
 

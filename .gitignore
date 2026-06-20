@@ -5,3 +5,5 @@ logs/
 *.log
 fix_config.py
 config/knowledge/
+config/prompts.json
+.last_version
