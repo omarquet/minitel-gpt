@@ -431,6 +431,8 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
       <input type=password name=mistral_key placeholder="clé Mistral...">
       <button class="btn btn-p">Enregistrer la clé</button>
     </form>
+    <p class=sub style=margin-top:10px>Pas encore de clé ?
+      <a href="https://admin.mistral.ai/organization/api-keys" target=_blank rel=noopener>Créer une clé API sur Mistral &#8599;</a></p>
     <p class=sub style=margin-top:10px>Adresse de l'admin : consultable sur le Minitel via la touche <b>Guide</b>.</p>
   </div>
   <div class=block>

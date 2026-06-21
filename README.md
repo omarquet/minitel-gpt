@@ -99,7 +99,7 @@ MISTRAL_MODEL=mistral-small-latest
 ```
 
 > La clé Mistral peut aussi être saisie depuis l'interface d'admin
-> (onglet **Paramètres**). Crée-la sur https://console.mistral.ai/
+> (onglet **Paramètres**). Crée-la sur https://admin.mistral.ai/organization/api-keys
 
 ### Préparation de la carte SD (avant tout)
 
