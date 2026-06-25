@@ -568,7 +568,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
         <label>Clé API Claude <span class=sub>(actuelle : {{claude_key_masked}})</span></label>
         <input type=password name=anthropic_key placeholder="clé Anthropic sk-ant-... (vide = conserver l'actuelle)">
         <p class=sub style=margin:6px 0 0>Pas encore de clé ?
-          <a href="https://console.anthropic.com/settings/keys" target=_blank rel=noopener>Créer une clé API Claude &#8599;</a></p>
+          <a href="https://platform.claude.com/" target=_blank rel=noopener>Créer une clé API Claude &#8599;</a></p>
         <label>Modèle Claude</label>
         <select name=claude_model>
           {% for cid,desc in claude_models %}

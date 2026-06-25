@@ -4,10 +4,11 @@ Transformer un **Minitel** (testé sur **Minitel 1 Telic / Alcatel** et
 **Minitel 2**) en terminal de chat IA autonome, piloté par un **Raspberry Pi
 Zero 2 W**.
 
-On tape sa question sur le clavier du Minitel, le Pi interroge un modèle
-**Mistral** et affiche la réponse à l'écran, à 1200 bauds. La personnalité de
-l'assistant est configurable via une interface web (la version phare est
-« bloquée dans les années 80 »).
+On tape sa question sur le clavier du Minitel, le Pi interroge le modèle d'IA
+choisi - **Mistral** ou **Claude** - et affiche la réponse à l'écran, à 1200
+bauds. Le fournisseur, la clé et le modèle se règlent depuis l'interface web,
+tout comme la personnalité de l'assistant (la version phare est « bloquée dans
+les années 80 »).
 
 🌐 Présentation du projet : https://minitel-gpt.herard.com
 
@@ -110,7 +111,7 @@ CLAUDE_MODEL=claude-haiku-4-5
 > règlent aussi depuis l'interface d'admin (onglet **Paramètres**), avec pour
 > chaque modèle son coût et sa pertinence. Crée une clé Mistral sur
 > https://admin.mistral.ai/organization/api-keys et une clé Claude sur
-> https://console.anthropic.com/settings/keys
+> https://platform.claude.com/
 
 ### Préparation de la carte SD (avant tout)
 
