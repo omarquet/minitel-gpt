@@ -126,13 +126,21 @@ def get_ip():
     except Exception:
         return None
 
+# Journalisation : toujours sur la sortie standard (capturée par systemd/journald).
+# Le fichier de log est un bonus : s'il n'est pas accessible (droits, FS plein…),
+# on continue sans lui plutôt que de tuer le terminal. Un simple souci de log ne
+# doit jamais empêcher l'affichage sur le Minitel.
+_handlers = [logging.StreamHandler(sys.stdout)]
+_LOG_FILE = Path(__file__).parent.parent / "logs" / "chatgpt.log"
+try:
+    _handlers.insert(0, logging.FileHandler(_LOG_FILE))
+except Exception as _e:  # PermissionError, FileNotFoundError…
+    print(f"[minitel-gpt] log fichier indisponible ({_e}), sortie standard seule",
+          file=sys.stderr)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [minitel-gpt] %(levelname)s %(message)s",
-    handlers=[
-        logging.FileHandler("/home/minitel/minitel-gpt/logs/chatgpt.log"),
-        logging.StreamHandler(sys.stdout),
-    ],
+    handlers=_handlers,
 )
 log = logging.getLogger(__name__)
 
