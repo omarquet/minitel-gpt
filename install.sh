@@ -15,16 +15,20 @@ echo "[1/7] Paquets système..."
 apt-get update -q
 apt-get install -y \
   git \
-  python3-serial python3-requests python3-flask python3-dotenv \
+  python3-serial python3-requests python3-flask python3-dotenv python3-pip \
   dnsmasq-base iw minicom
 #   git         : mise à jour de l'app depuis l'admin web (git fetch/reset)
 #   python3-*   : pyserial (port Minitel), requests (Mistral), flask + dotenv (admin)
+#   python3-pip : repli pour pyfiglet (absent par défaut sur Pi OS Lite)
 #   dnsmasq-base + iw : hotspot WiFi de provisioning
 #   minicom     : utilitaire de debug série (optionnel)
 
-# ── Dépendances Python (hors apt) ───────────────────────────────────────────
+# ── Dépendances Python (pyfiglet : titre ASCII de l'accueil) ────────────────
 echo "[2/7] Paquets Python..."
-python3 -m pip install pyfiglet --break-system-packages   # titre ASCII de l'accueil
+# De préférence via apt (pas de --break-system-packages) ; sinon pip en repli.
+if ! apt-get install -y python3-pyfiglet 2>/dev/null; then
+  python3 -m pip install pyfiglet --break-system-packages
+fi
 
 # ── Désactiver le dnsmasq système (conflit port 53 avec le hotspot) ─────────
 echo "[3/7] Nettoyage dnsmasq système..."
