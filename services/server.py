@@ -23,10 +23,13 @@ import time
 import logging
 from pathlib import Path
 
+import requests
+
 # Les fichiers d'origine sont dans services/ ; on s'assure qu'ils sont importables.
 sys.path.insert(0, str(Path(__file__).parent))
 
 from flask_sock import Sock
+from flask import send_file
 
 # App Flask d'admin existante (expose `app` au niveau module, port 8080 d'origine).
 from admin_ui import app
@@ -55,6 +58,9 @@ sock = Sock(app)
 
 # URL publique de l'admin, affichee sur le Minitel via la touche GUIDE.
 ADMIN_URL = os.getenv("ADMIN_PUBLIC_URL", "")
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "mistral").strip().lower()
+GEMINI_API_KEY = os.getenv("GEMINI_KEY") or os.getenv("GEMINI_API_KEY") or ""
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
 
 class WSClosed(Exception):
@@ -157,8 +163,47 @@ def show_guide_ws(t):
     t.read_key(120)
 
 
+def call_gemini(system_prompt, history):
+    """Appelle l'API Gemini via HTTP brut sans toucher aux fichiers d'origine."""
+    if not GEMINI_API_KEY:
+        raise RuntimeError("GEMINI_KEY/GEMINI_API_KEY non configure")
+
+    contents = []
+    if system_prompt:
+        contents.append({
+            "role": "user",
+            "parts": [{"text": f"[System]\n{system_prompt}"}],
+        })
+    for item in history:
+        role = "user" if item.get("role") == "user" else "model"
+        contents.append({
+            "role": role,
+            "parts": [{"text": item.get("content", "")}],
+        })
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+    response = requests.post(
+        url,
+        json={"contents": contents, "generationConfig": {"maxOutputTokens": 700}},
+        timeout=30,
+    )
+    response.raise_for_status()
+    data = response.json()
+    parts = []
+    for candidate in data.get("candidates", []):
+        for part in candidate.get("content", {}).get("parts", []):
+            text = part.get("text", "") if isinstance(part, dict) else ""
+            if text:
+                parts.append(text)
+    if parts:
+        return "".join(parts).strip()
+    raise RuntimeError(f"Reponse Gemini non exploitable: {data}")
+
+
 def run_session(t):
     """Reprend la boucle de run() d'origine, mais pilotee par un WSTerm."""
+    llm_fn = call_gemini if LLM_PROVIDER == "gemini" else call_llm
+
     while True:                             # boucle sommaire
         system_prompt, title_msg, question_msg, loading_msg = load_preset()
         history = []
@@ -176,7 +221,7 @@ def run_session(t):
 
             t.w(bytes([CR, LF])); t.w(FG_CYAN); t.line(""); t.center(loading_msg)
             try:
-                answer = to_ascii(call_llm(system_prompt, history))
+                answer = to_ascii(llm_fn(system_prompt, history))
                 history.append({"role": "assistant", "content": answer})
             except Exception as e:
                 log.error("API: %s", e)
@@ -204,9 +249,81 @@ def ws_minitel(ws):
         log.exception("Session terminee sur erreur: %s", e)
 
 
+@sock.route("/ws-echo")
+def ws_echo(ws):
+    log.info("Echo client connecte")
+    try:
+        while True:
+            msg = ws.receive()
+            if msg is None:
+                break
+            if isinstance(msg, str):
+                ws.send(f"echo: {msg}")
+            else:
+                ws.send(msg)
+    except Exception as e:
+        log.info("Echo client deconnecte: %s", e)
+
+
+@sock.route("/ws-gemini")
+def ws_gemini(ws):
+    log.info("Client Gemini connecte")
+    history = []
+    system_prompt = "Tu es un assistant concis, utile et amical. Réponds en français."
+    try:
+        while True:
+            msg = ws.receive()
+            if msg is None:
+                break
+            if isinstance(msg, (bytes, bytearray)):
+                text = bytes(msg).decode("utf-8", errors="ignore")
+            else:
+                text = str(msg)
+            text = text.strip()
+            if not text:
+                continue
+
+            history.append({"role": "user", "content": text})
+            try:
+                answer = call_gemini(system_prompt, history)
+                history.append({"role": "assistant", "content": answer})
+                payload = bytes([FF, RS]) + b"GEMINI> " + answer.encode("ascii", errors="replace") + bytes([CR, LF])
+                ws.send(payload)
+            except Exception as exc:
+                log.exception("Erreur Gemini: %s", exc)
+                payload = bytes([FF, RS]) + f"ERREUR GEMINI: {exc}".encode("ascii", errors="replace") + bytes([CR, LF])
+                ws.send(payload)
+    except Exception as e:
+        log.info("Client Gemini deconnecte: %s", e)
+
+
 @app.route("/healthz")
 def healthz():
     return "ok", 200
+
+
+@app.route("/minitel-emulator.html")
+def minitel_emulator():
+    html_path = Path(__file__).resolve().parent.parent / "minitel-emulator.html"
+    return send_file(html_path, mimetype="text/html")
+
+
+@app.route("/minitel-emulator.minimal.html")
+def minitel_emulator_minimal():
+    html_path = Path(__file__).resolve().parent.parent / "minitel-emulator.minimal.html"
+    return send_file(html_path, mimetype="text/html")
+
+
+@app.route("/minitel-emulator.simple.html")
+def minitel_emulator_simple():
+    html_path = Path(__file__).resolve().parent.parent / "minitel-emulator.simple.html"
+    return send_file(html_path, mimetype="text/html")
+
+
+@app.route("/minitel-echo-test.html")
+def minitel_echo_test():
+    html_path = Path(__file__).resolve().parent.parent / "minitel-echo-test.html"
+    return send_file(html_path, mimetype="text/html")
 
 
 if __name__ == "__main__":

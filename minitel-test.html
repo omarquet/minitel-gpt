@@ -1,0 +1,229 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Conversation Gemini Minitel</title>
+<style>
+  body { margin:0; background:#0b0b0b; color:#d9ffd9; font-family: ui-monospace, monospace; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 18px; }
+  .screen {
+    background:#000; color:#d9ffd9; border:2px solid #2d5f39; padding:14px;
+    min-height: 420px; white-space: pre-wrap; line-height: 1.2;
+    font-size: 15px;
+  }
+  .row { display:flex; gap:8px; margin-top:8px; }
+  input { flex:1; background:#111; color:#d9ffd9; border:1px solid #355f3d; padding:8px; font-family: ui-monospace, monospace; }
+  button { background:#1f3a24; color:#d9ffd9; border:1px solid #3b6e40; padding:8px 10px; cursor:pointer; font-family: ui-monospace, monospace; }
+  .status { margin-top:8px; font-size:13px; color:#8eff9b; }
+</style>
+<div class="wrap">
+  <div class="screen" id="screen">Connexion au service Minitel…</div>
+  <div class="row">
+    <input id="message" placeholder="Tapez votre message (ENTER envoie)" />
+    <button id="sendBtn">ENVOI</button>
+  </div>
+  <div class="row">
+    <button id="connectBtn">CONNECTER</button>
+    <button id="disconnectBtn" disabled>DECONNECTER</button>
+    <button id="clearBtn">EFFACER</button>
+  </div>
+  <div class="row" id="fnButtons">
+    <button data-fn="0x46">SOMMAIRE</button>
+    <button data-fn="0x48">SUITE</button>
+    <button data-fn="0x41">ENVOI</button>
+    <button data-fn="0x44">GUIDE</button>
+    <button data-fn="0x42">RETOUR</button>
+    <button data-fn="0x47">CORRECTION</button>
+    <button data-fn="0x45">ANNULATION</button>
+    <button data-fn="0x43">REPETITION</button>
+  </div>
+  <div class="status" id="status">deconnecte</div>
+</div>
+<script>
+  const COLS = 40, ROWS = 25;
+  const PALETTE = ["#000", "#f55", "#3f6", "#fd4", "#59f", "#f6f", "#4ee", "#eee"];
+  const screenEl = document.getElementById('screen');
+  const statusEl = document.getElementById('status');
+  const messageInput = document.getElementById('message');
+  const connectBtn = document.getElementById('connectBtn');
+  const sendBtn = document.getElementById('sendBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const url = 'ws://127.0.0.1:8080/ws';
+  const SEP = 0x13;
+  const K_SOMMAIRE = 0x46;
+  const K_SUITE = 0x48;
+  const K_ENVOI = 0x41;
+  const K_GUIDE = 0x44;
+  const K_RETOUR = 0x42;
+  const K_CORRECTION = 0x47;
+  const K_ANNULATION = 0x45;
+  const K_REPETITION = 0x43;
+  let ws = null;
+  let grid = [];
+  let curColor = 7;
+  let cr = 0;
+  let cc = 0;
+  let esc = false;
+
+  const disconnectBtn = document.getElementById('disconnectBtn');
+  const fnButtons = document.getElementById('fnButtons');
+
+  function setStatus(text) {
+    statusEl.textContent = text;
+  }
+
+  function updateButtonState() {
+    const open = ws && ws.readyState === WebSocket.OPEN;
+    disconnectBtn.disabled = !open;
+    for (const button of fnButtons.querySelectorAll('button')) {
+      button.disabled = !open;
+    }
+    connectBtn.disabled = open;
+  }
+
+  function initGrid() {
+    grid = Array.from({ length: ROWS }, () => Array.from({ length: COLS }, () => ({ ch: ' ', col: 7 })));
+    curColor = 7;
+    cr = 0;
+    cc = 0;
+    esc = false;
+  }
+
+  const ESCAPE_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
+  function escapeHtml(ch) {
+    return ESCAPE_MAP[ch] || ch;
+  }
+
+  function render() {
+    let html = '';
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const cell = grid[r][c];
+        const ch = cell.ch === ' ' ? '\u00a0' : escapeHtml(cell.ch);
+        html += `<span style="color:${PALETTE[cell.col]}">${ch}</span>`;
+      }
+      html += '\n';
+    }
+    screenEl.innerHTML = html;
+  }
+
+  function scrollUp() {
+    grid.shift();
+    grid.push(Array.from({ length: COLS }, () => ({ ch: ' ', col: 7 })));
+  }
+
+  function putChar(ch) {
+    if (cc >= COLS) { cc = 0; cr++; }
+    if (cr >= ROWS) { scrollUp(); cr = ROWS - 1; }
+    grid[cr][cc] = { ch, col: curColor };
+    cc++;
+  }
+
+  function feed(bytes) {
+    for (const b of bytes) {
+      if (esc) {
+        esc = false;
+        if (b >= 0x40 && b <= 0x47) curColor = b - 0x40;
+        continue;
+      }
+      switch (b) {
+        case 0x1B: esc = true; break;
+        case 0x0C: initGrid(); break;
+        case 0x1E: cr = 0; cc = 0; break;
+        case 0x0D: cc = 0; break;
+        case 0x0A: cr++; if (cr >= ROWS) { scrollUp(); cr = ROWS - 1; } break;
+        case 0x08: cc = Math.max(0, cc - 1); break;
+        default:
+          if (b >= 0x20 && b <= 0x7E) putChar(String.fromCharCode(b));
+      }
+    }
+    render();
+  }
+
+  function clearScreen() {
+    initGrid();
+    render();
+  }
+
+  function connectNow() {
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+    clearScreen();
+    feed([0x0C, 0x1E]);
+    feed('=== TERMINAL MINITEL ==='.split('').map(c => c.charCodeAt(0)));
+    feed([0x0D, 0x0A]);
+    feed('Connexion au serveur…'.split('').map(c => c.charCodeAt(0)));
+    setStatus('connexion…');
+    ws = new WebSocket(url);
+    ws.binaryType = 'arraybuffer';
+    ws.onopen = () => {
+      setStatus('connecte');
+      updateButtonState();
+    };
+    ws.onmessage = (event) => {
+      const data = typeof event.data === 'string' ? new TextEncoder().encode(event.data) : new Uint8Array(event.data);
+      feed(data);
+    };
+    ws.onerror = () => {
+      setStatus('erreur');
+      feed([0x0D, 0x0A]);
+      feed('ERREUR DE TRANSPORT'.split('').map(c => c.charCodeAt(0)));
+    };
+    ws.onclose = () => {
+      setStatus('deconnecte');
+      feed([0x0D, 0x0A]);
+      feed('DECONNECTE'.split('').map(c => c.charCodeAt(0)));
+      ws = null;
+      updateButtonState();
+    };
+  }
+
+  function sendFn(code) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    ws.send(new Uint8Array([SEP, code]));
+  }
+
+  function disconnectNow() {
+    if (!ws) return;
+    ws.close();
+    ws = null;
+    updateButtonState();
+  }
+
+  function sendNow() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      feed([0x0D, 0x0A]);
+      feed('ERREUR: pas de connexion'.split('').map(c => c.charCodeAt(0)));
+      return;
+    }
+    const text = messageInput.value.trim();
+    if (!text) return;
+    feed([0x0D, 0x0A]);
+    feed(text.split('').map(c => c.charCodeAt(0)));
+    ws.send(text + '\r');
+    messageInput.value = '';
+  }
+
+  connectBtn.addEventListener('click', connectNow);
+  disconnectBtn.addEventListener('click', disconnectNow);
+  sendBtn.addEventListener('click', sendNow);
+  clearBtn.addEventListener('click', clearScreen);
+  fnButtons.addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    const fn = btn.dataset.fn && parseInt(btn.dataset.fn, 16);
+    if (fn) {
+      sendFn(fn);
+    }
+  });
+  messageInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      sendNow();
+      e.preventDefault();
+    }
+  });
+  initGrid();
+  render();
+  connectNow();
+</script>
