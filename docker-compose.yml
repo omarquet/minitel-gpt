@@ -1,0 +1,25 @@
+services:
+  minitel-gpt:
+    build: .
+    restart: unless-stopped
+    environment:
+      # Fournisseur d'IA : "mistral" (defaut) ou "claude"
+      - LLM_PROVIDER=${LLM_PROVIDER:-mistral}
+      - MISTRAL_KEY=${MISTRAL_KEY}
+      - MISTRAL_MODEL=${MISTRAL_MODEL:-mistral-small-latest}
+      - ANTHROPIC_KEY=${ANTHROPIC_KEY}
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-haiku-4-5}
+      # Admin web
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-mistral}
+      - FLASK_SECRET=${FLASK_SECRET:-change-me}
+      # URL publique affichee sur le Minitel via la touche GUIDE
+      - ADMIN_PUBLIC_URL=${ADMIN_PUBLIC_URL}
+    volumes:
+      # Persiste personnalites (prompts.json) + fichiers de connaissance
+      - minitel-config:/app/config
+    ports:
+      # Coolify met Traefik devant et route ton domaine vers ce port.
+      - "8080"
+
+volumes:
+  minitel-config:
