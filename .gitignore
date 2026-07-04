@@ -8,4 +8,4 @@ config/knowledge/
 config/prompts.json
 .last_version
 .DS_Store
-.claude/
+.claude/settings.local.json
