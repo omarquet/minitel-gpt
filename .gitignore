@@ -7,3 +7,5 @@ fix_config.py
 config/knowledge/
 config/prompts.json
 .last_version
+.DS_Store
+.claude/
