@@ -490,12 +490,14 @@ def show_response(t, text: str, start_at_last=False):
     Retourne 'sommaire' / 'done' / 'timeout'.
 
     start_at_last=True (revision apres coup, cf. l'action 'retour' de
-    read_question) : commence sur la derniere page et attend une touche
-    meme la, contrairement au mode normal qui rend la main des la
-    derniere page (SUITE y vaut alors "terminer la revision")."""
+    read_question) : demarre sur l'avant-derniere page (RETOUR doit
+    montrer autre chose que ce qu'on vient deja de lire, pas la repeter)
+    et attend une touche meme sur la derniere page, contrairement au mode
+    normal qui rend la main directement (SUITE y vaut alors "terminer la
+    revision")."""
     lines = wrap(text)
     pages = [lines[i:i+CONTENT_ROWS] for i in range(0, len(lines), CONTENT_ROWS)] or [[""]]
-    pidx = len(pages) - 1 if start_at_last else 0
+    pidx = max(0, len(pages) - 2) if start_at_last else 0
     while True:
         t.clear()
         t.w(FG_WHITE)
