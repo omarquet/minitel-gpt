@@ -77,21 +77,25 @@ def ws_token_valid():
 # Un LLM ne connait pas la date du jour par lui-meme : pour les presets figes
 # dans le temps (ex. annees80bis), on lui fournit le jour/mois reels ramenes
 # a l'annee configuree via le champ optionnel "fixed_year" du preset actif.
+# FALLBACK_FIXED_YEARS couvre les presets existants dont le prompts.json deja
+# deploye (volume Coolify) n'a pas encore ce champ.
 MOIS_FR = ["janvier", "fevrier", "mars", "avril", "mai", "juin", "juillet",
            "aout", "septembre", "octobre", "novembre", "decembre"]
+FALLBACK_FIXED_YEARS = {"annees80": 1989, "annees80bis": 1989}
 
 
 def active_preset_raw():
     try:
         with open(mg.PROMPTS_FILE, encoding="utf-8") as f:
             data = json.load(f)
-        return data["presets"].get(data["active"], {})
+        return data["active"], data["presets"].get(data["active"], {})
     except Exception:
-        return {}
+        return None, {}
 
 
 def with_fixed_date(system_prompt):
-    fixed_year = active_preset_raw().get("fixed_year")
+    key, preset = active_preset_raw()
+    fixed_year = preset.get("fixed_year") or FALLBACK_FIXED_YEARS.get(key)
     if not fixed_year:
         return system_prompt
     now = datetime.now()
