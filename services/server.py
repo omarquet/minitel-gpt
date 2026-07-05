@@ -18,6 +18,7 @@ Ce fichier est purement ADDITIF : il ne modifie ni admin_ui.py ni
 minitel_chatgpt.py, ce qui garde le depot a jour facilement (git pull).
 """
 import os
+import re
 import sys
 import time
 import json
@@ -101,6 +102,32 @@ def with_fixed_date(system_prompt):
     now = datetime.now()
     date_str = f"{now.day} {MOIS_FR[now.month - 1]} {fixed_year}"
     return system_prompt + f"\n\n[Information systeme] Nous sommes aujourd'hui le {date_str}."
+
+
+# Seule exception ou le personnage a le droit de regarder sur le net en
+# temps reel : le programme d'Agile en Seine, qui change jusqu'au dernier
+# moment. Pas de tool-calling generique, juste ce cas precis, en dur.
+AGILE_EN_SEINE_URL = "https://www.agileenseine.com/programme-2026/"
+AGILE_EN_SEINE_KEYWORDS = ("agile en seine", "agileenseine")
+
+
+def is_agile_en_seine_question(text):
+    t = text.lower()
+    return any(k in t for k in AGILE_EN_SEINE_KEYWORDS)
+
+
+def fetch_agile_en_seine_context():
+    try:
+        r = requests.get(AGILE_EN_SEINE_URL, timeout=5)
+        r.raise_for_status()
+        html = re.sub(r"<script[^>]*>.*?</script>", " ", r.text, flags=re.S | re.I)
+        html = re.sub(r"<style[^>]*>.*?</style>", " ", html, flags=re.S | re.I)
+        text = re.sub(r"<[^>]+>", " ", html)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text[:4000]
+    except Exception as e:
+        log.warning("fetch agile en seine: %s", e)
+        return ""
 
 
 class WSClosed(Exception):
@@ -261,8 +288,15 @@ def run_session(t):
             log.info("Q: %r", question)
 
             t.w(bytes([CR, LF])); t.w(FG_CYAN); t.line(""); t.center(loading_msg)
+            call_prompt = system_prompt
+            if is_agile_en_seine_question(question):
+                ctx = fetch_agile_en_seine_context()
+                if ctx:
+                    call_prompt += ("\n\nCONTENU ACTUEL DE LA PAGE DU PROGRAMME (extrait "
+                                     "brut, utilise ces infos pour repondre precisement) "
+                                     ":\n" + ctx)
             try:
-                answer = to_ascii(llm_fn(system_prompt, history))
+                answer = to_ascii(llm_fn(call_prompt, history))
                 history.append({"role": "assistant", "content": answer})
             except Exception as e:
                 log.error("API: %s", e)
