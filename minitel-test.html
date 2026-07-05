@@ -2,45 +2,118 @@
 <meta charset="utf-8">
 <title>Conversation Gemini Minitel</title>
 <style>
-  body { margin:0; background:#0b0b0b; color:#d9ffd9; font-family: ui-monospace, monospace; }
-  .wrap { max-width: 760px; margin: 0 auto; padding: 18px; }
-  .screen {
-    background:#000; color:#d9ffd9; border:2px solid #2d5f39; padding:14px;
-    min-height: 420px; white-space: pre-wrap; line-height: 1.2;
-    font-size: 15px;
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; padding: 24px 12px;
+    background: radial-gradient(ellipse at top, #3a3a3d, #1c1c1e 70%);
+    color: #d9ffd9; font-family: ui-monospace, "Courier New", monospace;
+    display: flex; flex-direction: column; align-items: center; gap: 16px;
   }
-  .row { display:flex; gap:8px; margin-top:8px; }
-  input { flex:1; background:#111; color:#d9ffd9; border:1px solid #355f3d; padding:8px; font-family: ui-monospace, monospace; }
-  button { background:#1f3a24; color:#d9ffd9; border:1px solid #3b6e40; padding:8px 10px; cursor:pointer; font-family: ui-monospace, monospace; }
-  .status { margin-top:8px; font-size:13px; color:#8eff9b; }
+
+  /* Barre d'outils de test (n'existe pas sur un vrai Minitel) */
+  .devbar {
+    width: 100%; max-width: 560px; display: flex; flex-wrap: wrap; gap: 6px;
+    align-items: center; padding: 8px 10px; background: #111214;
+    border: 1px solid #2c2c30; border-radius: 8px; font-size: 12px;
+  }
+  .devbar input {
+    flex: 1; min-width: 120px; background: #000; color: #8eff9b;
+    border: 1px solid #2d5f39; border-radius: 4px; padding: 6px 8px;
+    font-family: inherit; font-size: 12px;
+  }
+  .devbar button {
+    background: #232326; color: #ccc; border: 1px solid #3a3a3e;
+    border-radius: 4px; padding: 6px 10px; cursor: pointer;
+    font-family: inherit; font-size: 12px;
+  }
+  .devbar button:disabled { opacity: .4; cursor: default; }
+  .status { color: #8eff9b; white-space: nowrap; }
+
+  /* Le boitier Minitel : plastique beige, coins arrondis */
+  .minitel {
+    width: 100%; max-width: 520px; background: linear-gradient(#e4dcc6, #d3c8a8);
+    border-radius: 18px; padding: 16px 16px 20px; box-shadow: 0 12px 30px rgba(0,0,0,.5);
+    border: 1px solid #b8ab84;
+  }
+  .brand {
+    display: flex; justify-content: space-between; align-items: baseline;
+    color: #6b5f42; font-size: 11px; letter-spacing: .12em; padding: 0 4px 8px;
+    font-family: Georgia, serif;
+  }
+  .brand b { font-size: 13px; letter-spacing: .2em; }
+
+  /* L'ecran, encadre par un bezel sombre facon tube cathodique */
+  .bezel {
+    background: #17140f; border-radius: 10px; padding: 10px;
+    box-shadow: inset 0 0 0 2px #060503, inset 0 0 18px rgba(0,0,0,.8);
+  }
+  .screen {
+    position: relative; overflow: hidden;
+    background: #05130a; color: #d9ffd9; border-radius: 3px; padding: 12px;
+    min-height: 380px; white-space: pre-wrap; line-height: 1.25;
+    font-size: 14px; box-shadow: inset 0 0 40px rgba(0,0,0,.6);
+  }
+  .screen::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(rgba(0,0,0,0) 0, rgba(0,0,0,0) 2px, rgba(0,0,0,.12) 3px),
+                radial-gradient(ellipse at center, rgba(255,255,255,.05), rgba(0,0,0,.35) 85%);
+  }
+
+  /* Bandeau clavier : zone de saisie + touches de fonction */
+  .keyboard { margin-top: 14px; padding: 12px; background: #cabe9c; border-radius: 10px;
+    border: 1px solid #b0a37e; box-shadow: inset 0 1px 0 rgba(255,255,255,.4); }
+  .typeslot { display: flex; gap: 6px; margin-bottom: 10px; }
+  .typeslot input {
+    flex: 1; background: #0b0b0b; color: #d9ffd9; border: 1px solid #443b26;
+    border-radius: 5px; padding: 9px 10px; font-family: inherit; font-size: 14px;
+  }
+  .fnkeys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .fk {
+    border: none; border-radius: 6px;
+    padding: 9px 6px; font-family: inherit; font-size: 11px; font-weight: bold;
+    letter-spacing: .03em; cursor: pointer; color: #1b1b1b;
+    box-shadow: 0 2px 0 rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.35);
+  }
+  .fk:active { box-shadow: 0 0px 0 rgba(0,0,0,.35); transform: translateY(2px); }
+  .fk:disabled { opacity: .5; cursor: default; }
+  .fk-grey   { background: #b9b2a0; }
+  .fk-blue   { background: #7fa8c9; }
+  .fk-orange { background: #e0a85c; }
+  .fk-green  { background: #6ec27a; }
 </style>
-<div class="wrap">
-  <div class="screen" id="screen">Connexion au service Minitel…</div>
-  <div class="row">
-    <input id="wsUrl" placeholder="wss://mondomaine.fr/ws" />
-    <input id="wsToken" placeholder="token (si WS_TOKEN configuré)" style="flex:0 0 220px" />
-  </div>
-  <div class="row">
-    <input id="message" placeholder="Tapez votre message (ENTER envoie)" />
-    <button id="sendBtn">ENVOI</button>
-  </div>
-  <div class="row">
-    <button id="connectBtn">CONNECTER</button>
-    <button id="disconnectBtn" disabled>DECONNECTER</button>
-    <button id="clearBtn">EFFACER</button>
-  </div>
-  <div class="row" id="fnButtons">
-    <button data-fn="0x46">SOMMAIRE</button>
-    <button data-fn="0x48">SUITE</button>
-    <button data-fn="0x41">ENVOI</button>
-    <button data-fn="0x44">GUIDE</button>
-    <button data-fn="0x42">RETOUR</button>
-    <button data-fn="0x47">CORRECTION</button>
-    <button data-fn="0x45">ANNULATION</button>
-    <button data-fn="0x43">REPETITION</button>
-  </div>
-  <div class="status" id="status">deconnecte</div>
+
+<div class="devbar">
+  <input id="wsUrl" placeholder="wss://mondomaine.fr/ws" />
+  <input id="wsToken" placeholder="token (si WS_TOKEN configuré)" style="flex:0 0 160px" />
+  <button id="connectBtn">Connecter</button>
+  <button id="disconnectBtn" disabled>Déconnecter</button>
+  <button id="clearBtn">Effacer</button>
+  <span class="status" id="status">deconnecte</span>
 </div>
+
+<div class="minitel">
+  <div class="brand"><b>Minitel</b><span>1B</span></div>
+  <div class="bezel">
+    <div class="screen" id="screen">Connexion au service Minitel…</div>
+  </div>
+  <div class="keyboard">
+    <div class="typeslot">
+      <input id="message" placeholder="Tapez votre message (ENTREE = ENVOI)" />
+      <button id="sendBtn" class="fk fk-green" style="flex:0 0 90px">Envoi</button>
+    </div>
+    <div class="fnkeys" id="fnButtons">
+      <button data-fn="0x46" class="fk fk-grey">Sommaire</button>
+      <button data-fn="0x45" class="fk fk-grey">Annulation</button>
+      <button data-fn="0x42" class="fk fk-grey">Retour</button>
+      <button data-fn="0x47" class="fk fk-grey">Correction</button>
+      <button data-fn="0x43" class="fk fk-grey">Répétition</button>
+      <button data-fn="0x44" class="fk fk-blue">Guide</button>
+      <button data-fn="0x48" class="fk fk-orange">Suite</button>
+      <button data-fn="0x41" class="fk fk-green">Envoi</button>
+    </div>
+  </div>
+</div>
+
 <script>
   const COLS = 40, ROWS = 25;
   const PALETTE = ["#000", "#f55", "#3f6", "#fd4", "#59f", "#f6f", "#4ee", "#eee"];
@@ -118,7 +191,7 @@
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
         const cell = grid[r][c];
-        const ch = cell.ch === ' ' ? '\u00a0' : escapeHtml(cell.ch);
+        const ch = cell.ch === ' ' ? ' ' : escapeHtml(cell.ch);
         const transform = SIZE_TRANSFORM[cell.size] || '';
         const style = `color:${PALETTE[cell.col]}` +
           (transform ? `;display:inline-block;transform:${transform};transform-origin:left` : '');
