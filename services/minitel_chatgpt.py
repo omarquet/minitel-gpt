@@ -68,12 +68,30 @@ PROMPTS_FILE = Path(__file__).parent.parent / "config" / "prompts.json"
 PROMPTS_DEFAULT = Path(__file__).parent.parent / "config" / "prompts.default.json"
 
 
+PROMPTS_TEXT_DIR = Path(__file__).parent.parent / "config" / "prompts"
+
+
 def ensure_prompts():
     """prompts.json est local (gitignoré) : si absent (1er lancement / après une
-    mise à jour), on le crée depuis prompts.default.json fourni par le dépôt."""
-    if not PROMPTS_FILE.exists() and PROMPTS_DEFAULT.exists():
-        PROMPTS_FILE.write_text(PROMPTS_DEFAULT.read_text(encoding="utf-8"),
-                                encoding="utf-8")
+    mise à jour), on le crée depuis prompts.default.json fourni par le dépôt.
+
+    Un preset peut référencer son prompt système via "system_file" (nom de
+    fichier dans config/prompts/) plutôt qu'une chaîne JSON échappée sur une
+    seule ligne - plus simple à éditer/relire. Résolu une seule fois ici, à
+    la création : prompts.json reste ensuite un JSON autonome, éditable
+    normalement depuis l'admin web (le champ "system" est alors la source)."""
+    if PROMPTS_FILE.exists() or not PROMPTS_DEFAULT.exists():
+        return
+    data = json.loads(PROMPTS_DEFAULT.read_text(encoding="utf-8"))
+    for preset in data.get("presets", {}).values():
+        system_file = preset.get("system_file")
+        if not system_file:
+            continue
+        f = PROMPTS_TEXT_DIR / system_file
+        if f.exists():
+            preset["system"] = f.read_text(encoding="utf-8").strip()
+    PROMPTS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                            encoding="utf-8")
 
 
 def call_mistral(system_prompt, history):

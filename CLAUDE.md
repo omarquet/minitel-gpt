@@ -66,6 +66,13 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> Coolify/Traefik --> con
   `WS_TOKEN` est configuré côté serveur, `/ws`, `/ws-echo` et `/ws-gemini`
   exigent `?token=...` en query string (sinon connexion refusée en silence).
   L'ESP32 doit inclure le même token dans `WS_PATH` (voir le `.ino`).
+- **Prompt système éditable en fichier texte** : un preset de
+  `prompts.default.json` peut avoir `"system_file": "nom.txt"` (fichier dans
+  `config/prompts/`) au lieu d'un `"system"` échappé sur une seule ligne.
+  `ensure_prompts()` (`minitel_chatgpt.py`) résout la référence une seule
+  fois, au premier boot, en copiant le contenu du fichier dans le
+  `prompts.json` du volume — qui redevient ensuite un JSON autonome, éditable
+  normalement depuis l'admin web (le `system_file` n'est plus relu après).
 
 ## Variables d'environnement (Coolify)
 
