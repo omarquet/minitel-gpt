@@ -65,7 +65,11 @@
   .screen {
     position: relative; overflow: hidden;
     background: #05130a; color: #d9ffd9; border-radius: 3px; padding: 12px;
-    min-height: 380px; white-space: pre-wrap; line-height: 1.25;
+    /* Hauteur fixe (25 lignes) : un vrai Minitel a un ecran de taille physique
+       constante, quel que soit le texte affiche (contrairement a min-height,
+       qui grandissait avec les lignes en {grand}/double hauteur). */
+    height: calc(12px * 2 + 25 * 14px * 1.25);
+    white-space: pre-wrap; line-height: 1.25;
     font-size: 14px; box-shadow: inset 0 0 40px rgba(0,0,0,.6);
   }
   .screen::after {

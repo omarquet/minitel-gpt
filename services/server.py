@@ -269,6 +269,7 @@ def run_session(t):
                 last = next((h["content"] for h in reversed(history)
                              if h["role"] == "assistant"), None)
                 if last is None:
+                    t.w(bytes([CR, LF]))   # sinon le prochain "> " s'accole au precedent
                     continue
                 start_at_last = (action == 'retour')
                 if show_response(t, apply_minitel_markup(last), start_at_last) in ('sommaire', 'timeout'):
