@@ -14,6 +14,10 @@ from flask import (Flask, render_template_string, request, redirect,
                    url_for, session, jsonify, send_from_directory)
 from werkzeug.utils import secure_filename
 
+import sys
+sys.path.insert(0, str(Path(__file__).parent))
+from minitel_gpt import strip_markdown
+
 PROJ_DIR = Path(__file__).parent.parent
 ASSETS_DIR = PROJ_DIR / "assets"
 PROMPTS_FILE = PROJ_DIR / "config" / "prompts.json"
@@ -709,8 +713,15 @@ def test_preset_route():
     if kb:
         prompt_text += ("\n\nCONNAISSANCES DE REFERENCE (utilise ces informations "
                    "en priorite pour repondre) :\n" + kb)
+    # Meme contrainte que load_preset() (minitel_gpt.py) : pas de Markdown.
+    prompt_text += ("\n\nContrainte technique absolue : tu t'affiches sur un ecran "
+                     "Minitel qui ne sait afficher QUE du texte brut. N'utilise "
+                     "JAMAIS de syntaxe Markdown (pas de **gras**, *italique*, "
+                     "# titres, listes a puces avec * ou -, blocs de code avec "
+                     "des accents graves, liens [texte](url)) : ecris uniquement "
+                     "du texte simple.")
     try:
-        answer = llm_answer(prompt_text, msg)
+        answer = strip_markdown(llm_answer(prompt_text, msg))
         return jsonify(ok=True, answer=to_minitel_ascii(answer))
     except Exception as e:
         return jsonify(ok=False, error=str(e))

@@ -41,7 +41,7 @@ from admin_ui import app
 # On reutilise la logique d'ecran / lecture clavier / appel LLM partagee.
 import minitel_gpt as mg
 from minitel_gpt import (
-    load_preset, call_llm, call_gemini, to_ascii, wrap,
+    load_preset, call_llm, call_gemini, to_ascii, strip_markdown, wrap,
     show_home, read_question, show_response,
     COLS,
     CR, LF, FF, RS, ESC, SEP,
@@ -290,7 +290,7 @@ def run_session(t):
                                      "brut, utilise ces infos pour repondre precisement) "
                                      ":\n" + ctx)
             try:
-                answer = to_ascii(call_llm(call_prompt, history))
+                answer = to_ascii(strip_markdown(call_llm(call_prompt, history)))
                 history.append({"role": "assistant", "content": answer})
             except Exception as e:
                 log.error("API: %s", e)
@@ -363,7 +363,7 @@ def ws_gemini(ws):
 
             history.append({"role": "user", "content": text})
             try:
-                answer = call_gemini(system_prompt, history)
+                answer = strip_markdown(call_gemini(system_prompt, history))
                 history.append({"role": "assistant", "content": answer})
                 payload = bytes([FF, RS]) + b"GEMINI> " + answer.encode("ascii", errors="replace") + bytes([CR, LF])
                 ws.send(payload)

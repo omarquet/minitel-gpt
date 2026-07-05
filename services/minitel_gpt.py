@@ -7,6 +7,7 @@ Timeout 5 min sans action → retour sommaire.
 """
 import json
 import os
+import re
 import sys
 import logging
 import unicodedata
@@ -29,6 +30,27 @@ def to_ascii(s: str) -> str:
         s = s.replace(k, v)
     s = unicodedata.normalize("NFKD", s)
     return s.encode("ascii", "ignore").decode("ascii")
+
+# Le Minitel ne sait pas afficher le Markdown (pas de gras/italique/titres) :
+# le prompt systeme demande au LLM de ne pas en generer (voir load_preset),
+# mais on retire quand meme la syntaxe au cas ou, plutot que d'afficher les
+# symboles bruts (**, _, #, `) a l'ecran.
+_MARKDOWN_PATTERNS = [
+    (re.compile(r"\*\*(.+?)\*\*"), r"\1"),              # **gras**
+    (re.compile(r"__(.+?)__"), r"\1"),                  # __gras__
+    (re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)"), r"\1"),  # *italique*
+    (re.compile(r"(?<!_)_(?!_)(.+?)(?<!_)_(?!_)"), r"\1"),        # _italique_
+    (re.compile(r"`([^`]+)`"), r"\1"),                  # `code`
+    (re.compile(r"^#{1,6}\s+", re.M), ""),              # # Titre
+    (re.compile(r"\[([^\]]+)\]\([^)]+\)"), r"\1"),      # [texte](url)
+]
+
+def strip_markdown(s: str) -> str:
+    if not s:
+        return s
+    for pattern, repl in _MARKDOWN_PATTERNS:
+        s = pattern.sub(repl, s)
+    return s
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
@@ -255,6 +277,12 @@ def load_preset():
         if knowledge:
             prompt += ("\n\nCONNAISSANCES DE REFERENCE (utilise ces informations "
                        "en priorite pour repondre) :\n" + knowledge)
+        prompt += ("\n\nContrainte technique absolue : tu t'affiches sur un ecran "
+                   "Minitel qui ne sait afficher QUE du texte brut. N'utilise "
+                   "JAMAIS de syntaxe Markdown (pas de **gras**, *italique*, "
+                   "# titres, listes a puces avec * ou -, blocs de code avec "
+                   "des accents graves, liens [texte](url)) : ecris uniquement "
+                   "du texte simple.")
         return (
             prompt,
             p.get("title_msg", "*** MINITEL GPT ***"),
