@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-server.py - point d'entree unique du service (VPS / Coolify).
+server.py - point d'entree unique du service (VPS).
 
 Ce fork ne supporte plus le montage Raspberry Pi + port serie de l'origine :
 minitel_gpt.py a ete allege de tout ce qui etait specifique au Pi (classe
@@ -76,7 +76,7 @@ def ws_token_valid():
 # dans le temps (ex. annees80bis), on lui fournit le jour/mois reels ramenes
 # a l'annee configuree via le champ optionnel "fixed_year" du preset actif.
 # FALLBACK_FIXED_YEARS couvre les presets existants dont le prompts.json deja
-# deploye (volume Coolify) n'a pas encore ce champ.
+# deploye (volume du serveur) n'a pas encore ce champ.
 MOIS_FR = ["janvier", "fevrier", "mars", "avril", "mai", "juin", "juillet",
            "aout", "septembre", "octobre", "novembre", "decembre"]
 FALLBACK_FIXED_YEARS = {"annees80": 1989, "annees80bis": 1989}
@@ -274,7 +274,8 @@ def run_session(t):
                 start_at_last = (action == 'retour')
                 if show_response(t, apply_minitel_markup(last), start_at_last) in ('sommaire', 'timeout'):
                     break
-                t.w(bytes([CR, LF])); t.w(FG_WHITE)
+                t.clear()
+                t.w(FG_WHITE)
                 t.center("Repondez ou SOMMAIRE pour finir")
                 t.w(bytes([CR, LF]))
                 continue

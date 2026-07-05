@@ -2,7 +2,7 @@
  * minitel_esp32_bridge.ino
  * ------------------------------------------------------------------
  * Pont TRANSPARENT entre le Minitel (UART DIN5, 1200 7E1) et le service
- * minitel-gpt heberge sur le VPS Coolify, via WebSocket securise (wss).
+ * minitel-gpt heberge sur le VPS, via WebSocket securise (wss).
  *
  * L'ESP32 ne fait AUCUN traitement Videotex : il relaie les octets bruts.
  *   Minitel -> UART RX -> WebSocket (frame binaire) -> serveur
@@ -36,7 +36,7 @@
 const char* WIFI_SSID     = "TON_WIFI";
 const char* WIFI_PASSWORD = "TON_MDP_WIFI";
 
-const char* WS_HOST = "minitel.mondomaine.fr";  // ton domaine Coolify
+const char* WS_HOST = "minitel.mondomaine.fr";   // ton serveur
 const int   WS_PORT = 443;                       // wss
 // Si WS_TOKEN est configure cote serveur (variable d'env WS_TOKEN), le
 // jeton doit etre passe ici en query string, sinon le serveur refuse la
@@ -96,7 +96,7 @@ void setup() {
   Serial.printf("\n[WiFi] OK, IP %s\n", WiFi.localIP().toString().c_str());
 
   // wss:// -> beginSSL. Pour un demarrage simple on ne verifie pas le cert.
-  // (Traefik/Coolify presente un vrai cert Let's Encrypt ; pour durcir, tu
+  // (ton reverse proxy presente un vrai cert Let's Encrypt ; pour durcir, tu
   //  peux ensuite fournir l'empreinte via webSocket.setSSLFingerprint.)
   webSocket.beginSSL(WS_HOST, WS_PORT, WS_PATH);
   webSocket.onEvent(onWsEvent);

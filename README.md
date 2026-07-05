@@ -1,7 +1,7 @@
 # MINITEL GPT
 
 Transformer un **Minitel** en terminal de chat IA, servi par un conteneur
-Docker hébergé sur un VPS (testé avec **Coolify**), relié au Minitel par un
+Docker hébergé sur un VPS, relié au Minitel par un
 **ESP32** qui fait le pont entre le port série (DIN5, Vidéotex) et une
 **WebSocket sécurisée (wss)**.
 
@@ -10,7 +10,7 @@ qui pilote le Minitel directement depuis un Raspberry Pi (port série local).
 Ce fork remplace entièrement le Pi et le port série par la chaîne suivante :
 
 ```
-Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> Coolify/Traefik --> conteneur minitel-gpt
+Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conteneur minitel-gpt
 ```
 
 On tape sa question sur le clavier du Minitel, le serveur interroge le modèle
@@ -23,7 +23,7 @@ est « bloquée dans les années 80 »).
 
 ## Déploiement
 
-Voir [DEPLOY.md](DEPLOY.md) pour la procédure pas à pas (fork GitHub, Coolify,
+Voir [DEPLOY.md](DEPLOY.md) pour la procédure pas à pas (fork GitHub, serveur,
 variables d'environnement, test sans matériel).
 
 Variables d'environnement principales (`.env.example` à la racine) :
@@ -118,7 +118,7 @@ volume Docker persistant, pas dans le dépôt git.
 > Les personnalités/prompts sont pris en compte immédiatement (relus à chaque
 > conversation). En revanche, changer la clé/le fournisseur LLM dans
 > **Paramètres** ne s'applique au terminal Minitel qu'après un redéploiement
-> Coolify (les mises à jour de code aussi passent par un redéploiement après
+> du serveur (les mises à jour de code aussi passent par un redéploiement après
 > `git push`, plus de bouton "mettre à jour" dans l'admin).
 
 ---
@@ -150,7 +150,7 @@ firmware/
   minitel_esp32_bridge.ino  pont UART <-> WebSocket
 minitel-test.html        émulateur Minitel dans le navigateur (test sans matériel)
 Dockerfile, docker-compose.yml, entrypoint.sh
-DEPLOY.md                procédure de déploiement Coolify
+DEPLOY.md                procédure de déploiement
 ```
 
 ---
@@ -159,8 +159,8 @@ DEPLOY.md                procédure de déploiement Coolify
 
 | Symptôme | Cause probable |
 |---|---|
-| 502 Bad Gateway sur toutes les routes | conteneur pas démarré/joignable - vérifie les logs Coolify et le port du healthcheck (doit être celui de `EXPOSE` dans le Dockerfile, pas un défaut générique) |
-| `minitel-test.html` ne se connecte pas | mauvais protocole (`wss://` pas `ws://` derrière Traefik/HTTPS), `WS_TOKEN` manquant dans l'URL si configuré côté serveur, ou pas de port dans l'URL publique (Traefik route en 443 en interne vers le port du conteneur) |
+| 502 Bad Gateway sur toutes les routes | conteneur pas démarré/joignable - vérifie les logs du serveur et le port du healthcheck (doit être celui de `EXPOSE` dans le Dockerfile, pas un défaut générique) |
+| `minitel-test.html` ne se connecte pas | mauvais protocole (`wss://` pas `ws://` derrière le reverse proxy/HTTPS), `WS_TOKEN` manquant dans l'URL si configuré côté serveur, ou pas de port dans l'URL publique (le reverse proxy route en 443 en interne vers le port du conteneur) |
 | Erreur API (401/403) sur les réponses | clé du fournisseur actif (`LLM_PROVIDER`) absente ou invalide |
 | Rien ne s'affiche sur le vrai Minitel | câblage DIN délogé, level shifter absent/mal branché, ou broche 4/5 pontée par erreur |
 | Charabia à l'écran | vitesse ESP32 ≠ vitesse Minitel (rester à 1200 bauds 7E1 des deux côtés) |

@@ -9,7 +9,7 @@ Fork de `jherard-fr/minitel-gpt`. Le projet d'origine transforme un Minitel en
 terminal de chat IA (Mistral ou Claude) piloté par un Raspberry Pi qui lit
 directement le port série `/dev/ttyUSB0` (FTDI -> DIN5, 1200 7E1).
 
-Ce fork déplace le service sur un **VPS Coolify** (image Docker) et remplace
+Ce fork déplace le service sur un **VPS** (image Docker) et remplace
 le Pi + FTDI par un **ESP32** qui fait un pont transparent entre l'UART du
 Minitel et le serveur via **WebSocket sécurisé (wss)**. Le support Raspberry Pi
 d'origine (port série, systemd, WiFi captif) a été **entièrement retiré** :
@@ -19,7 +19,7 @@ donc plus possible sans conflits.
 
 Chaîne cible :
 ```
-Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> Coolify/Traefik --> conteneur minitel-gpt
+Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conteneur minitel-gpt
 ```
 
 ## Répartition du code
@@ -42,20 +42,20 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> Coolify/Traefik --> con
   dans `prompts.json`), en plus d'afficher l'URL de l'admin.
 - `Dockerfile` + `entrypoint.sh` + `requirements.txt` — image Python 3.11,
   lancée par gunicorn (`-k gthread`). L'entrypoint amorce le volume config.
-- `docker-compose.yml` — pour Coolify, volume `minitel-config` persistant.
+- `docker-compose.yml` — pour le serveur, volume `minitel-config` persistant.
 - `firmware/minitel_esp32_bridge.ino` — firmware ESP32 : UART2 en `SERIAL_7E1`
   (1200 bauds) <-> WebSocket client (lib WebSockets de Links2004). Relais brut.
 - `minitel-test.html` — émulateur Minitel navigateur qui parle le MÊME
   protocole WebSocket binaire que l'ESP32 (rendu Videotex 40 col, touches SEP),
   URL et token WS configurables dans l'interface. Sert à tester SANS matériel.
-- `DEPLOY.md` — guide de déploiement Coolify pas à pas.
+- `DEPLOY.md` — guide de déploiement pas à pas.
 
 ## Points techniques importants / pièges
 
 - Le protocole WS est symétrique : frames binaires, octets bruts dans les deux
   sens. Le serveur envoie du Videotex 7 bits, l'ESP32 relaie sans rien parser.
 - Le 7E1 est géré par l'UART de l'ESP32, pas côté serveur.
-- Transport = WebSocket (pas TCP brut) car Traefik/Coolify route le wss en 443
+- Transport = WebSocket (pas TCP brut) car le reverse proxy route le wss en 443
   sans config spéciale.
 - **Piège matériel** : le port DIN Minitel est en 5 V, les GPIO ESP32 en 3,3 V
   NON tolérants 5 V -> adaptateur de niveau logique bidirectionnel OBLIGATOIRE
@@ -63,7 +63,7 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> Coolify/Traefik --> con
 - L'admin en conteneur : les boutons Update/Rollback/Restart hérités du Pi
   (systemd + git) ont été retirés de l'interface (inutilisables en conteneur,
   cf. `git log` sur `admin_ui.py`) ; les mises à jour se font par redéploiement
-  Coolify. Les personnalités/prompts se rechargent à chaud à chaque retour au
+  du serveur. Les personnalités/prompts se rechargent à chaud à chaque retour au
   sommaire (pas de redémarrage nécessaire) ; en revanche la clé/le provider LLM
   du terminal sont lus une seule fois au démarrage du process — un changement
   via l'admin (`/save-llm`) n'est pris en compte par le vrai terminal Minitel
@@ -82,7 +82,7 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> Coolify/Traefik --> con
   `prompts.json` du volume — qui redevient ensuite un JSON autonome, éditable
   normalement depuis l'admin web (le `system_file` n'est plus relu après).
 
-## Variables d'environnement (Coolify)
+## Variables d'environnement (serveur)
 
 `LLM_PROVIDER` (`mistral`, `claude` ou `gemini`), `MISTRAL_KEY`, `MISTRAL_MODEL`,
 `ANTHROPIC_KEY`, `CLAUDE_MODEL`, `GEMINI_KEY`, `GEMINI_MODEL`,
@@ -92,7 +92,7 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> Coolify/Traefik --> con
 
 - [x] Refactor transport + `server.py` validé (import + session simulée + stack
       réel gunicorn/flask-sock testés : accueil, pagination, touches OK).
-- [x] Fork créé : https://github.com/omarquet/minitel-gpt, déployé sur Coolify
+- [x] Fork créé : https://github.com/omarquet/minitel-gpt, déployé
       (https://minitel.playground.aqoba.fr).
 - [x] Support Raspberry Pi entièrement retiré (install.sh, unités systemd,
       sudoers, port série, WiFi captif) ; README.md réécrit pour VPS/ESP32.

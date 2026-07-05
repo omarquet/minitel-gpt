@@ -1,4 +1,4 @@
-# Déploiement minitel-gpt sur VPS Coolify (ESP32 + WebSocket)
+# Déploiement minitel-gpt sur VPS (ESP32 + WebSocket)
 
 Ce dépôt tourne en conteneur Docker (Flask + gunicorn), sans dépendance au
 matériel Raspberry Pi de l'upstream d'origine.
@@ -8,9 +8,9 @@ matériel Raspberry Pi de l'upstream d'origine.
 Fork ou clone direct de https://github.com/omarquet/minitel-gpt selon ton
 usage.
 
-## 2. Coolify
+## 2. Déploiement sur ton serveur
 
-1. New Resource → Docker Compose (ou Dockerfile), source = ton fork.
+1. Nouvelle app/service à partir de ton fork, en Docker Compose (ou Dockerfile).
 2. Environment :
    - `LLM_PROVIDER=mistral` (ou `claude` / `gemini`)
    - `MISTRAL_KEY=...`  `MISTRAL_MODEL=mistral-small-latest`
@@ -20,8 +20,8 @@ usage.
    - `WS_TOKEN=...` (recommandé) : sans ça, `/ws` est ouvert à qui connaît
      l'URL et peut consommer ta clé API. Avec un token, l'ESP32 et tes tests
      doivent ajouter `?token=...` à l'URL WebSocket.
-3. Domaine `minitel.tondomaine.fr`, port exposé **8080** (Traefik gère TLS + WebSocket).
-   ⚠️ Vérifie aussi le **port du healthcheck** dans les réglages Coolify : il
+3. Domaine `minitel.tondomaine.fr`, port exposé **8080** (le reverse proxy gère TLS + WebSocket).
+   ⚠️ Vérifie aussi le **port du healthcheck** dans la config de ton serveur : il
    revient parfois à une valeur par défaut (ex. 3000) qui ne correspond pas au
    port réel du conteneur (8080) - ça provoque un 502 permanent même si l'app
    tourne parfaitement (visible dans les logs : `Healthcheck URL: .../3000/healthz`).
@@ -38,7 +38,7 @@ docker compose up --build
 Ouvre `minitel-test.html`, URL `ws://localhost:8080/ws`, clique **Connecter**.
 Tape une question, **Entrée** = ENVOI ; boutons SUITE / SOMMAIRE / GUIDE.
 
-Une fois sur Coolify, pointe l'émulateur sur `wss://minitel.tondomaine.fr/ws`
+Une fois déployé sur ton serveur, pointe l'émulateur sur `wss://minitel.tondomaine.fr/ws`
 pour valider le VPS avant toute soudure.
 
 ## 4. Matériel ESP32 (rappel critique)
