@@ -96,6 +96,11 @@ un buck converter réglé sur 5 V avant l'ESP32, avec un condensateur
 470-1000 µF sur le rail 5 V. Le côté LV (VCCA) du level shifter reste sur le
 3,3 V de l'ESP32, le côté HV (VCCB) sur le 5 V du buck.
 
+> ⚠️ Cette alimentation sur la broche 5 dépend du circuit vidéo interne du
+> Minitel 1B : les modèles à base de **VGP5** (comme le Matra ci-dessus) la
+> fournissent, les plus anciens à base de **VGP2** ne l'ont pas - prévoir une
+> alimentation externe pour l'ESP32 dans ce cas.
+
 Paramètres série : **1200 bauds, 7 bits, parité paire, 1 stop (7E1)** - norme
 Videotex, gérés par l'UART de l'ESP32 (`SERIAL_7E1`).
 

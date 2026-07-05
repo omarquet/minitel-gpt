@@ -28,6 +28,10 @@
  *   Un condensateur 470-1000 uF sur le rail 5 V pres de l'ESP32 est
  *   recommande. Cote LV (VCCA) du level shifter sur le 3V3 de l'ESP32.
  *   Broche 4 : ne pas toucher.
+ *   ATTENTION : cette alimentation sur la broche 5 depend du circuit video
+ *   interne du Minitel 1B. Les modeles a base de VGP5 (comme ici) la
+ *   fournissent ; les plus anciens a base de VGP2 ne l'ont PAS -> prevoir
+ *   une alimentation externe pour l'ESP32 dans ce cas.
  *
  * !!! IMPORTANT NIVEAUX LOGIQUES !!!
  * Le port peri-info du Minitel est en 5 V (c'est pourquoi le projet d'origine
