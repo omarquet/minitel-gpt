@@ -12,11 +12,22 @@
  *   -> Gestionnaire de bibliotheques Arduino : chercher "WebSockets by Markus Sattler"
  *
  * ============================ CABLAGE ============================
- * DIN5 peri-informatique Minitel  <->  ESP32 (UART2)
+ * Exemple valide sur un Minitel 1B Matra (carte VGP5). Le brochage DIN-5
+ * du Minitel N'EST PAS sequentiel : de gauche a droite vu de face (broches
+ * visibles, connecteur oriente detrompeur en bas), c'est 1 - 4 - 2 - 5 - 3.
+ *
+ * Donnees (via level shifter, cote A = ESP32 3,3 V, cote B = Minitel 5 V) :
  *   DIN broche 1 (Minitel RX)  <-  ESP32 TX (GPIO17)   [via level shifter]
  *   DIN broche 3 (Minitel TX)  ->  ESP32 RX (GPIO16)   [via level shifter]
- *   DIN broche 2 (GND)         <-> ESP32 GND
- *   DIN broches 4 et 5 : NE PAS TOUCHER (la 5 porte une tension).
+ *   DIN broche 2 (GND)         <-> ESP32 GND (masse commune avec le buck
+ *                                   et le level shifter)
+ *
+ * Alimentation (optionnel, evite une alim externe separee) :
+ *   DIN broche 5 (~8,5 a 13 V selon le Minitel) -> buck converter regle
+ *   sur 5 V -> pin 5V/VIN de l'ESP32 + cote HV (VCCB) du level shifter.
+ *   Un condensateur 470-1000 uF sur le rail 5 V pres de l'ESP32 est
+ *   recommande. Cote LV (VCCA) du level shifter sur le 3V3 de l'ESP32.
+ *   Broche 4 : ne pas toucher.
  *
  * !!! IMPORTANT NIVEAUX LOGIQUES !!!
  * Le port peri-info du Minitel est en 5 V (c'est pourquoi le projet d'origine

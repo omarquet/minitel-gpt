@@ -68,6 +68,7 @@ de personnalité active directement depuis le Minitel.
 |---|---|
 | ESP32 | N'importe quelle carte de dev (WiFi + 2 UART) |
 | Adaptateur de niveau logique | **Bidirectionnel obligatoire** (BSS138 / TXS0108E) |
+| Buck converter | Optionnel : régulateur 5 V pour alimenter l'ESP32 depuis le Minitel |
 | Minitel | Prise DIN 5 broches « péri-informatique » |
 
 > ⚠️ **Piège matériel** : le port DIN du Minitel est en **5 V**, les GPIO de
@@ -75,14 +76,25 @@ de personnalité active directement depuis le Minitel.
 > bidirectionnel est **obligatoire**, au moins sur Minitel TX → ESP32 RX (sinon
 > tu grilles le GPIO). Recommandé aussi dans l'autre sens pour une marge propre.
 
+> ⚠️ **Le brochage DIN-5 n'est pas séquentiel** : de gauche à droite vu de
+> face (détrompeur en bas), c'est **1 - 4 - 2 - 5 - 3**, pas 1-2-3-4-5.
+
 ### Câblage
+
+Exemple validé sur un Minitel 1B Matra (carte VGP5) :
 
 | DIN Minitel | ESP32 (via level shifter) | Rôle |
 |---|---|---|
 | broche 1 | UART2 TX (GPIO17) | ESP32 → Minitel (RX) |
 | broche 3 | UART2 RX (GPIO16) | Minitel → ESP32 (TX) |
-| broche 2 | GND | masse commune |
-| broches 4 et 5 | **ne pas toucher** | la broche 5 porte une tension |
+| broche 2 | GND | masse commune (ESP32, buck, level shifter) |
+| broche 5 | buck converter → 5 V | alimentation ESP32 (VIN) + côté HV du level shifter (optionnel, évite une alim externe) |
+| broche 4 | **ne pas toucher** | — |
+
+Alimentation depuis la broche 5 (~8,5 à 13 V selon le Minitel) : passer par
+un buck converter réglé sur 5 V avant l'ESP32, avec un condensateur
+470-1000 µF sur le rail 5 V. Le côté LV (VCCA) du level shifter reste sur le
+3,3 V de l'ESP32, le côté HV (VCCB) sur le 5 V du buck.
 
 Paramètres série : **1200 bauds, 7 bits, parité paire, 1 stop (7E1)** - norme
 Videotex, gérés par l'UART de l'ESP32 (`SERIAL_7E1`).
@@ -162,7 +174,7 @@ DEPLOY.md                procédure de déploiement
 | 502 Bad Gateway sur toutes les routes | conteneur pas démarré/joignable - vérifie les logs du serveur et le port du healthcheck (doit être celui de `EXPOSE` dans le Dockerfile, pas un défaut générique) |
 | `minitel-test.html` ne se connecte pas | mauvais protocole (`wss://` pas `ws://` derrière le reverse proxy/HTTPS), `WS_TOKEN` manquant dans l'URL si configuré côté serveur, ou pas de port dans l'URL publique (le reverse proxy route en 443 en interne vers le port du conteneur) |
 | Erreur API (401/403) sur les réponses | clé du fournisseur actif (`LLM_PROVIDER`) absente ou invalide |
-| Rien ne s'affiche sur le vrai Minitel | câblage DIN délogé, level shifter absent/mal branché, ou broche 4/5 pontée par erreur |
+| Rien ne s'affiche sur le vrai Minitel | câblage DIN délogé, level shifter absent/mal branché, broche 4 pontée par erreur, ou brochage DIN mal identifié (l'ordre physique n'est pas 1-2-3-4-5, voir plus haut) |
 | Charabia à l'écran | vitesse ESP32 ≠ vitesse Minitel (rester à 1200 bauds 7E1 des deux côtés) |
 
 ---
