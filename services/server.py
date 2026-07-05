@@ -173,7 +173,7 @@ class WSTerm:
             if msg is None:                # timeout : rien recu ce cycle
                 return None
             if isinstance(msg, str):
-                msg = msg.encode("ascii", errors="ignore")
+                msg = to_ascii(msg).encode("ascii", errors="ignore")
             if not msg:                    # frame vide -> fermeture cote client
                 raise WSClosed("empty frame")
             self._buf.extend(msg)

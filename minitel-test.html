@@ -338,15 +338,20 @@
     updateButtonState();
   }
 
+  // Le Minitel n'affiche pas les accents (ASCII 7 bits) : on les retire ici
+  // aussi, pour que l'echo local corresponde a ce que le serveur recevra.
+  function toAscii(s) {
+    return s.normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+  }
+
   function sendNow() {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       feed([0x0D, 0x0A]);
       feed('ERREUR: pas de connexion'.split('').map(c => c.charCodeAt(0)));
       return;
     }
-    const text = messageInput.value.trim();
+    const text = toAscii(messageInput.value.trim());
     if (!text) return;
-    feed([0x0D, 0x0A]);
     feed(text.split('').map(c => c.charCodeAt(0)));
     ws.send(text + '\r');
     messageInput.value = '';
