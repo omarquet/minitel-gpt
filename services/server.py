@@ -11,7 +11,7 @@ Fait tourner, dans UN SEUL processus Flask :
 Cote materiel : un ESP32 relie au Minitel (DIN5, UART 1200 7E1) se connecte a
 wss://<domaine>/ws et fait un pont transparent octet-a-octet entre l'UART du
 Minitel et la WebSocket. Le meme protocole (frames binaires, octets bruts) est
-parlable depuis un navigateur (voir minitel-emulator.html), ce qui permet de
+parlable depuis un navigateur (voir minitel-test.html), ce qui permet de
 tester la chaine complete SANS ESP32.
 
 Ce fichier est purement ADDITIF : il ne modifie ni admin_ui.py ni
@@ -439,30 +439,6 @@ def ws_gemini(ws):
 @app.route("/healthz")
 def healthz():
     return "ok", 200
-
-
-@app.route("/minitel-emulator.html")
-def minitel_emulator():
-    html_path = Path(__file__).resolve().parent.parent / "minitel-emulator.html"
-    return send_file(html_path, mimetype="text/html")
-
-
-@app.route("/minitel-emulator.minimal.html")
-def minitel_emulator_minimal():
-    html_path = Path(__file__).resolve().parent.parent / "minitel-emulator.minimal.html"
-    return send_file(html_path, mimetype="text/html")
-
-
-@app.route("/minitel-emulator.simple.html")
-def minitel_emulator_simple():
-    html_path = Path(__file__).resolve().parent.parent / "minitel-emulator.simple.html"
-    return send_file(html_path, mimetype="text/html")
-
-
-@app.route("/minitel-echo-test.html")
-def minitel_echo_test():
-    html_path = Path(__file__).resolve().parent.parent / "minitel-echo-test.html"
-    return send_file(html_path, mimetype="text/html")
 
 
 @app.route("/minitel-test.html")
