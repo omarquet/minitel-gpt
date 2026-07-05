@@ -72,7 +72,7 @@ def normalized_presets(data):
     for k, p in data["presets"].items():
         merged = dict(DEFAULTS)
         merged.update(p)
-        merged.setdefault("system", "")
+        merged.setdefault("prompt", "")
         merged.setdefault("label", k)
         out[k] = merged
     return out
@@ -497,7 +497,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
       <label>Message d'attente (max 40)</label>
       <input type=text name=loading_msg id=floading maxlength=40>
       <label>Prompt système (consignes de l'IA)</label>
-      <textarea name=system_prompt id=fsystem rows=12></textarea>
+      <textarea name=prompt id=fsystem rows=12></textarea>
       <hr>
       <button class="btn btn-p">💾 Enregistrer</button>
       <button class="btn btn-s" formaction=/apply-preset>✓ Activer</button>
@@ -633,7 +633,7 @@ document.querySelectorAll('nav.tabs button').forEach(b=>{
 function loadPreset(){
   const k=document.getElementById('presetSel').value, p=PRESETS[k]; if(!p)return;
   fkey.value=k; flabel.value=p.label||''; ftitle.value=p.title_msg||'';
-  fquestion.value=p.question_msg||''; floading.value=p.loading_msg||''; fsystem.value=p.system||'';
+  fquestion.value=p.question_msg||''; floading.value=p.loading_msg||''; fsystem.value=p.prompt||'';
   document.getElementById('activeInfo').textContent=
     (k===ACTIVE)?'● Personnalité actuellement active sur le Minitel.'
                 :'Personnalité inactive. Cliquez « Activer » pour l\\'utiliser.';
@@ -672,12 +672,12 @@ async function testPreset(){
   const msg=document.getElementById('testMsg').value.trim();
   if(!msg){alert('Saisissez une question');return;}
   const key=document.getElementById('presetSel').value;
-  const system=document.getElementById('fsystem').value;
+  const promptText=document.getElementById('fsystem').value;
   const spin=document.getElementById('testSpin'), out=document.getElementById('testOut');
   spin.style.display='block'; out.style.display='none';
   try{
     const r=await fetch('/test-preset',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({preset_key:key,message:msg,system:system})});
+      body:JSON.stringify({preset_key:key,message:msg,prompt:promptText})});
     const j=await r.json();
     out.style.display='block';
     out.textContent = j.ok ? (j.answer||'(réponse vide)') : ('Erreur : '+j.error);
@@ -739,9 +739,9 @@ def save_prompt():
     p["title_msg"] = to_minitel_ascii(request.form.get("title_msg", DEFAULTS["title_msg"]))[:40]
     p["question_msg"] = to_minitel_ascii(request.form.get("question_msg", DEFAULTS["question_msg"]))[:40]
     p["loading_msg"] = to_minitel_ascii(request.form.get("loading_msg", DEFAULTS["loading_msg"]))[:40]
-    sp = request.form.get("system_prompt", "").strip()
+    sp = request.form.get("prompt", "").strip()
     if sp:
-        p["system"] = sp
+        p["prompt"] = sp
     save_prompts(data)
     if k == data["active"]:
         restart_terminal()
@@ -761,8 +761,8 @@ def apply_preset():
             p["title_msg"] = to_minitel_ascii(request.form.get("title_msg", DEFAULTS["title_msg"]))[:40]
             p["question_msg"] = to_minitel_ascii(request.form.get("question_msg", DEFAULTS["question_msg"]))[:40]
             p["loading_msg"] = to_minitel_ascii(request.form.get("loading_msg", DEFAULTS["loading_msg"]))[:40]
-            if request.form.get("system_prompt", "").strip():
-                p["system"] = request.form.get("system_prompt").strip()
+            if request.form.get("prompt", "").strip():
+                p["prompt"] = request.form.get("prompt").strip()
         data["active"] = k
         save_prompts(data)
         restart_terminal()
@@ -782,7 +782,7 @@ def new_preset():
         session["flash"] = "Cet identifiant existe déjà."; session["flash_ok"] = False
     else:
         data["presets"][key] = {"label": label or key,
-                                "system": "Tu es un assistant. Reponds en ASCII sans accents, concis.",
+                                "prompt": "Tu es un assistant. Reponds en ASCII sans accents, concis.",
                                 **DEFAULTS}
         save_prompts(data)
         session["flash"] = f"Personnalité '{label}' créée. Éditez-la puis Activez-la."
@@ -828,14 +828,14 @@ def test_preset_route():
     data = load_prompts()
     if key not in data["presets"]:
         return jsonify(ok=False, error="Personnalité inconnue")
-    # Prompt système : la version en cours d'édition si fournie, sinon l'enregistrée.
-    system = (j.get("system") or "").strip() or data["presets"][key].get("system", "")
+    # Prompt : la version en cours d'édition si fournie, sinon l'enregistrée.
+    prompt_text = (j.get("prompt") or "").strip() or data["presets"][key].get("prompt", "")
     kb = load_knowledge_blob(key)
     if kb:
-        system += ("\n\nCONNAISSANCES DE REFERENCE (utilise ces informations "
+        prompt_text += ("\n\nCONNAISSANCES DE REFERENCE (utilise ces informations "
                    "en priorite pour repondre) :\n" + kb)
     try:
-        answer = llm_answer(system, msg)
+        answer = llm_answer(prompt_text, msg)
         return jsonify(ok=True, answer=to_minitel_ascii(answer))
     except Exception as e:
         return jsonify(ok=False, error=str(e))

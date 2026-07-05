@@ -75,21 +75,21 @@ def ensure_prompts():
     """prompts.json est local (gitignoré) : si absent (1er lancement / après une
     mise à jour), on le crée depuis prompts.default.json fourni par le dépôt.
 
-    Un preset peut référencer son prompt système via "system_file" (nom de
-    fichier dans config/prompts/) plutôt qu'une chaîne JSON échappée sur une
-    seule ligne - plus simple à éditer/relire. Résolu une seule fois ici, à
-    la création : prompts.json reste ensuite un JSON autonome, éditable
-    normalement depuis l'admin web (le champ "system" est alors la source)."""
+    Un preset peut référencer son prompt via "prompt_file" (nom de fichier
+    dans config/prompts/) plutôt qu'une chaîne JSON échappée sur une seule
+    ligne - plus simple à éditer/relire. Résolu une seule fois ici, à la
+    création : prompts.json reste ensuite un JSON autonome, éditable
+    normalement depuis l'admin web (le champ "prompt" est alors la source)."""
     if PROMPTS_FILE.exists() or not PROMPTS_DEFAULT.exists():
         return
     data = json.loads(PROMPTS_DEFAULT.read_text(encoding="utf-8"))
     for preset in data.get("presets", {}).values():
-        system_file = preset.get("system_file")
-        if not system_file:
+        prompt_file = preset.get("prompt_file")
+        if not prompt_file:
             continue
-        f = PROMPTS_TEXT_DIR / system_file
+        f = PROMPTS_TEXT_DIR / prompt_file
         if f.exists():
-            preset["system"] = f.read_text(encoding="utf-8").strip()
+            preset["prompt"] = f.read_text(encoding="utf-8").strip()
     PROMPTS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2),
                             encoding="utf-8")
 
@@ -243,20 +243,20 @@ def load_knowledge(active_key):
 
 
 def load_preset():
-    """Retourne (system, title_msg, question_msg, loading_msg).
-    Le system inclut les fichiers de connaissance du preset s'il y en a."""
+    """Retourne (prompt, title_msg, question_msg, loading_msg).
+    Le prompt inclut les fichiers de connaissance du preset s'il y en a."""
     try:
         ensure_prompts()
         data = json.load(open(PROMPTS_FILE))
         key = data["active"]
         p = data["presets"][key]
-        system = p.get("system", FALLBACK_PROMPT)
+        prompt = p.get("prompt", FALLBACK_PROMPT)
         knowledge = load_knowledge(key)
         if knowledge:
-            system += ("\n\nCONNAISSANCES DE REFERENCE (utilise ces informations "
+            prompt += ("\n\nCONNAISSANCES DE REFERENCE (utilise ces informations "
                        "en priorite pour repondre) :\n" + knowledge)
         return (
-            system,
+            prompt,
             p.get("title_msg", "*** MINITEL GPT ***"),
             p.get("question_msg", "Posez votre question :"),
             p.get("loading_msg", "Consultation en cours..."),
