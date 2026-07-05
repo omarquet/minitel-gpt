@@ -435,7 +435,9 @@ def show_home(t, title_msg, question_msg):
 
 def read_question(t):
     """Lit une question. Retourne (texte, 'envoi') / (None,'sommaire') / (None,'guide') /
-    (None,'repetition') / (None,'timeout')."""
+    (None,'repetition') / (None,'retour') / (None,'timeout').
+    RETOUR efface le dernier caractère s'il y en a un, sinon (saisie vide)
+    il demande a revoir la derniere reponse depuis sa derniere page."""
     t.w(FG_GREEN)
     t.w("> ")
     buf = []
@@ -452,10 +454,16 @@ def read_question(t):
             if code == K_ENVOI:
                 if buf:
                     return "".join(buf), 'envoi'
-            if code in (K_CORR, K_RETOUR):
+            if code == K_CORR:
                 if buf:
                     buf.pop()
                     t.w(bytes([BS, 0x20, BS]))   # backspace destructif
+            if code == K_RETOUR:
+                if buf:
+                    buf.pop()
+                    t.w(bytes([BS, 0x20, BS]))   # backspace destructif
+                else:
+                    return None, 'retour'
             if code == K_ANNUL:
                 if buf:
                     t.w(bytes([BS, 0x20, BS]) * len(buf))
@@ -476,23 +484,29 @@ def read_question(t):
             buf.append(chr(c))       # pas d'écho (le Minitel l'affiche)
 
 
-def show_response(t, text: str):
+def show_response(t, text: str, start_at_last=False):
     """Affiche la réponse en pages. RETOUR revient sur une page precedente
     (autant de fois que necessaire), SUITE avance, SOMMAIRE abandonne.
-    Retourne 'sommaire' / 'done' / 'timeout'."""
+    Retourne 'sommaire' / 'done' / 'timeout'.
+
+    start_at_last=True (revision apres coup, cf. l'action 'retour' de
+    read_question) : commence sur la derniere page et attend une touche
+    meme la, contrairement au mode normal qui rend la main des la
+    derniere page (SUITE y vaut alors "terminer la revision")."""
     lines = wrap(text)
     pages = [lines[i:i+CONTENT_ROWS] for i in range(0, len(lines), CONTENT_ROWS)] or [[""]]
-    pidx = 0
+    pidx = len(pages) - 1 if start_at_last else 0
     while True:
         t.clear()
         t.w(FG_WHITE)
         for ln in pages[pidx]:
             t.line(ln)
-        if pidx == len(pages) - 1:
+        last = (pidx == len(pages) - 1)
+        if last and not start_at_last:
             return 'done'
         t.w(bytes([CR, LF]))
         t.w(FG_CYAN)
-        t.center("-- SUITE pour la suite --")
+        t.center("-- SUITE pour continuer --" if last else "-- SUITE pour la suite --")
         if pidx > 0:
             t.center("-- RETOUR pour la page precedente --")
         while True:
@@ -501,6 +515,8 @@ def show_response(t, text: str):
                 return 'timeout'
             if kind == 'fn':
                 if code == K_SUITE:
+                    if last:
+                        return 'done'
                     pidx += 1
                     break
                 if code == K_SOMMAIRE:

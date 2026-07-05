@@ -265,12 +265,13 @@ def run_session(t):
             question, action = read_question(t)
             if action == 'guide':
                 show_guide_ws(t); break
-            if action == 'repetition':
+            if action in ('repetition', 'retour'):
                 last = next((h["content"] for h in reversed(history)
                              if h["role"] == "assistant"), None)
                 if last is None:
                     continue
-                if show_response(t, apply_minitel_markup(last)) in ('sommaire', 'timeout'):
+                start_at_last = (action == 'retour')
+                if show_response(t, apply_minitel_markup(last), start_at_last) in ('sommaire', 'timeout'):
                     break
                 t.w(bytes([CR, LF])); t.w(FG_WHITE)
                 t.center("Repondez ou SOMMAIRE pour finir")
