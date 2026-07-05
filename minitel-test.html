@@ -95,10 +95,10 @@
   }
   .fk:active { box-shadow: 0 0px 0 rgba(0,0,0,.35); transform: translateY(2px); }
   .fk:disabled { opacity: .5; cursor: default; }
-  .fk-grey   { background: #b9b2a0; }
-  .fk-blue   { background: #7fa8c9; }
-  .fk-orange { background: #e0a85c; }
-  .fk-green  { background: #6ec27a; }
+  /* Terracotta pour toutes les touches de fonction sauf Envoi (vert),
+     comme sur un vrai clavier Minitel (Telic/Alcatel). */
+  .fk-terra  { background: #b06a4d; color: #2b2018; }
+  .fk-green  { background: #4f9a56; color: #12240f; }
 </style>
 
 <div class="devbar">
@@ -125,13 +125,13 @@
       <button id="sendBtn" class="fk fk-green" style="flex:0 0 90px">Envoi</button>
     </div>
     <div class="fnkeys" id="fnButtons">
-      <button data-fn="0x46" class="fk fk-grey">Sommaire</button>
-      <button data-fn="0x45" class="fk fk-grey">Annulation</button>
-      <button data-fn="0x42" class="fk fk-grey">Retour</button>
-      <button data-fn="0x47" class="fk fk-grey">Correction</button>
-      <button data-fn="0x43" class="fk fk-grey">Répétition</button>
-      <button data-fn="0x44" class="fk fk-blue">Guide</button>
-      <button data-fn="0x48" class="fk fk-orange">Suite</button>
+      <button data-fn="0x46" class="fk fk-terra">Sommaire</button>
+      <button data-fn="0x45" class="fk fk-terra">Annulation</button>
+      <button data-fn="0x42" class="fk fk-terra">Retour</button>
+      <button data-fn="0x47" class="fk fk-terra">Correction</button>
+      <button data-fn="0x43" class="fk fk-terra">Répétition</button>
+      <button data-fn="0x44" class="fk fk-terra">Guide</button>
+      <button data-fn="0x48" class="fk fk-terra">Suite</button>
       <button data-fn="0x41" class="fk fk-green">Envoi</button>
     </div>
   </div>
