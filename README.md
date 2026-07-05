@@ -130,7 +130,7 @@ volume Docker persistant, pas dans le dépôt git.
 | **ENVOI** | Envoie la question tapée |
 | **SOMMAIRE** | Retour au menu principal (recharge le preset, réinitialise la conversation) |
 | **GUIDE** | Change de personnalité active (touche numérique), affiche aussi l'URL de l'admin |
-| **RETOUR** / **CORRECTION** | Efface le dernier caractère tapé |
+| **RETOUR** / **CORRECTION** | Efface le dernier caractère tapé ; pendant la lecture d'une réponse multi-pages, RETOUR revient à la page précédente (autant de fois que nécessaire) |
 | **ANNULATION** | Efface toute la phrase en cours de saisie |
 | **REPETITION** | Réaffiche la dernière réponse de l'assistant (sans nouvel appel API) |
 | **SUITE** | Page suivante (réponse sur plusieurs écrans) |

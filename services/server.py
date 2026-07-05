@@ -105,7 +105,7 @@ def with_fixed_date(system_prompt):
 # temps reel : le programme d'Agile en Seine, qui change jusqu'au dernier
 # moment. Pas de tool-calling generique, juste ce cas precis, en dur.
 AGILE_EN_SEINE_URL = "https://www.agileenseine.com/programme-2026/"
-AGILE_EN_SEINE_KEYWORDS = ("agile en seine", "agileenseine")
+AGILE_EN_SEINE_KEYWORDS = ("agile en seine", "agileenseine", "aes")
 
 
 def is_agile_en_seine_question(text):

@@ -459,28 +459,36 @@ def read_question(t):
 
 
 def show_response(t, text: str):
-    """Affiche la réponse en pages. Retourne 'sommaire' / 'done' / 'timeout'."""
+    """Affiche la réponse en pages. RETOUR revient sur une page precedente
+    (autant de fois que necessaire), SUITE avance, SOMMAIRE abandonne.
+    Retourne 'sommaire' / 'done' / 'timeout'."""
     lines = wrap(text)
     pages = [lines[i:i+CONTENT_ROWS] for i in range(0, len(lines), CONTENT_ROWS)] or [[""]]
-    for pidx, page in enumerate(pages):
+    pidx = 0
+    while True:
         t.clear()
         t.w(FG_WHITE)
-        for ln in page:
+        for ln in pages[pidx]:
             t.line(ln)
-        last = (pidx == len(pages) - 1)
-        if not last:
-            t.w(bytes([CR, LF]))
-            t.w(FG_CYAN)
-            t.center("-- SUITE pour la suite --")
-            while True:
-                kind, code = t.read_key(IDLE_TIMEOUT)
-                if kind == 'timeout':
-                    return 'timeout'
-                if kind == 'fn':
-                    if code == K_SUITE:
-                        break
-                    if code == K_SOMMAIRE:
-                        return 'sommaire'
-    return 'done'
+        if pidx == len(pages) - 1:
+            return 'done'
+        t.w(bytes([CR, LF]))
+        t.w(FG_CYAN)
+        t.center("-- SUITE pour la suite --")
+        if pidx > 0:
+            t.center("-- RETOUR pour la page precedente --")
+        while True:
+            kind, code = t.read_key(IDLE_TIMEOUT)
+            if kind == 'timeout':
+                return 'timeout'
+            if kind == 'fn':
+                if code == K_SUITE:
+                    pidx += 1
+                    break
+                if code == K_SOMMAIRE:
+                    return 'sommaire'
+                if code == K_RETOUR and pidx > 0:
+                    pidx -= 1
+                    break
 
 
