@@ -213,7 +213,9 @@ class WSTerm:
 
 def show_guide_ws(t):
     """Ecran GUIDE : sur un VPS l'IP locale n'a pas de sens, on affiche l'URL
-    publique de l'admin (ADMIN_PUBLIC_URL)."""
+    publique de l'admin (ADMIN_PUBLIC_URL). Contrairement au Pi d'origine,
+    /ws est accessible publiquement : on n'affiche jamais le mot de passe
+    admin ici (n'importe qui pourrait l'obtenir en appuyant sur GUIDE)."""
     t.clear()
     t.w(bytes([CR, LF, CR, LF]))
     t.w(FG_CYAN); t.center("=== ADMINISTRATION ===")
@@ -223,8 +225,6 @@ def show_guide_ws(t):
             t.center(chunk)
     else:
         t.center("Voir Coolify pour l'URL admin")
-    t.w(bytes([CR, LF, CR, LF]))
-    t.center("Mot de passe : " + os.getenv("ADMIN_PASSWORD", "mistral"))
     t.w(bytes([CR, LF, CR, LF, CR, LF]))
     t.w(FG_CYAN); t.center("Une touche pour revenir")
     t.read_key(120)
