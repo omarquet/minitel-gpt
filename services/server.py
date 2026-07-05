@@ -326,6 +326,12 @@ def minitel_echo_test():
     return send_file(html_path, mimetype="text/html")
 
 
+@app.route("/minitel-test.html")
+def minitel_test():
+    html_path = Path(__file__).resolve().parent.parent / "minitel-test.html"
+    return send_file(html_path, mimetype="text/html")
+
+
 if __name__ == "__main__":
     # Fallback developpement local. En prod, on lance gunicorn (voir Dockerfile).
     app.run(host="0.0.0.0", port=8080, threaded=True)
