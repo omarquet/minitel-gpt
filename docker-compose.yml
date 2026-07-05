@@ -3,7 +3,7 @@ services:
     build: .
     restart: unless-stopped
     environment:
-      # Fournisseur d'IA : "mistral" (defaut) ou "claude"
+      # Fournisseur d'IA : "mistral" (defaut), "claude" ou "gemini"
       - LLM_PROVIDER=${LLM_PROVIDER:-mistral}
       - MISTRAL_KEY=${MISTRAL_KEY}
       - MISTRAL_MODEL=${MISTRAL_MODEL:-mistral-small-latest}

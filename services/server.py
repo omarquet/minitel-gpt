@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
 """
-server.py - point d'entree unique pour le deploiement VPS / Coolify.
+server.py - point d'entree unique du service (VPS / Coolify).
+
+Ce fork ne supporte plus le montage Raspberry Pi + port serie de l'origine :
+minitel_chatgpt.py a ete allege de tout ce qui etait specifique au Pi (classe
+Term, boucle run() sur /dev/ttyUSB0). Il ne reste que la logique partagee
+(ecrans, LLM, lecture des touches) reutilisee ici via WSTerm.
 
 Fait tourner, dans UN SEUL processus Flask :
-  - l'interface d'admin existante (admin_ui.app), inchangee, servie sur "/"
+  - l'interface d'admin existante (admin_ui.app), servie sur "/"
   - un endpoint WebSocket "/ws" qui rejoue la boucle de chat du Minitel,
-    mais en lisant / ecrivant les octets Videotex sur la WebSocket au lieu
-    du port serie local /dev/ttyUSB0.
+    mais en lisant / ecrivant les octets Videotex sur la WebSocket.
 
 Cote materiel : un ESP32 relie au Minitel (DIN5, UART 1200 7E1) se connecte a
 wss://<domaine>/ws et fait un pont transparent octet-a-octet entre l'UART du
 Minitel et la WebSocket. Le meme protocole (frames binaires, octets bruts) est
 parlable depuis un navigateur (voir minitel-test.html), ce qui permet de
 tester la chaine complete SANS ESP32.
-
-Ce fichier est purement ADDITIF : il ne modifie ni admin_ui.py ni
-minitel_chatgpt.py, ce qui garde le depot a jour facilement (git pull).
 """
 import os
 import re
@@ -37,17 +38,14 @@ from flask import send_file, request
 # App Flask d'admin existante (expose `app` au niveau module, port 8080 d'origine).
 from admin_ui import app
 
-# On reutilise TOUTE la logique d'ecran / boucle du terminal d'origine.
-# minitel_chatgpt importe `serial` mais ne l'ouvre qu'a l'instanciation de Term,
-# ce qu'on ne fait jamais ici : l'import est donc sans risque sur un VPS.
+# On reutilise la logique d'ecran / lecture clavier / appel LLM partagee.
 import minitel_chatgpt as mg
 from minitel_chatgpt import (
-    load_preset, call_llm, to_ascii, wrap,
-    show_home, show_response,
-    COLS, IDLE_TIMEOUT,
-    CR, LF, FF, RS, ESC, SEP, BS,
-    FG_CYAN, FG_WHITE, FG_GREEN,
-    K_ENVOI, K_RETOUR, K_CORR, K_GUIDE, K_SOMMAIRE, K_ANNUL, K_REPET,
+    load_preset, call_llm, call_gemini, to_ascii, wrap,
+    show_home, read_question, show_response,
+    COLS,
+    CR, LF, FF, RS, ESC, SEP,
+    FG_CYAN, FG_WHITE,
     SS3_MAP,
 )
 
@@ -62,9 +60,6 @@ sock = Sock(app)
 
 # URL publique de l'admin, affichee sur le Minitel via la touche GUIDE.
 ADMIN_URL = os.getenv("ADMIN_PUBLIC_URL", "")
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "mistral").strip().lower()
-GEMINI_API_KEY = os.getenv("GEMINI_KEY") or os.getenv("GEMINI_API_KEY") or ""
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
 # Jeton partage protegeant les endpoints WebSocket (appelle une API payante) :
 # ?token=... dans l'URL, compare a WS_TOKEN. Si WS_TOKEN est vide, aucune
@@ -212,49 +207,6 @@ class WSTerm:
         return ('timeout', None)
 
 
-def read_question_ws(t):
-    """Copie de read_question() de minitel_chatgpt.py, avec en plus ANNULATION
-    (efface toute la phrase en cours) et REPETITION (redemande le dernier
-    message affiche). Duplique la logique plutot que de toucher au fichier
-    d'origine."""
-    t.w(FG_GREEN)
-    t.w("> ")
-    buf = []
-    while True:
-        kind, code = t.read_key(IDLE_TIMEOUT)
-        if kind == 'timeout':
-            return None, 'timeout'
-        if kind == 'fn':
-            if code == K_SOMMAIRE:
-                return None, 'sommaire'
-            if code == K_GUIDE:
-                return None, 'guide'
-            if code == K_ENVOI:
-                if buf:
-                    return "".join(buf), 'envoi'
-            if code in (K_CORR, K_RETOUR):
-                if buf:
-                    buf.pop()
-                    t.w(bytes([BS, 0x20, BS]))
-            if code == K_ANNUL:
-                if buf:
-                    t.w(bytes([BS, 0x20, BS]) * len(buf))
-                    buf.clear()
-            if code == K_REPET:
-                return None, 'repetition'
-            continue
-        c = code
-        if c in (CR, LF):
-            if buf:
-                return "".join(buf), 'envoi'
-        elif c in (BS, 0x7F):
-            if buf:
-                buf.pop()
-                t.w(bytes([BS, 0x20, BS]))
-        elif 0x20 <= c <= 0x7E:
-            buf.append(chr(c))
-
-
 def show_guide_ws(t):
     """Ecran GUIDE : sur un VPS l'IP locale n'a pas de sens, on affiche l'URL
     publique de l'admin (ADMIN_PUBLIC_URL). Contrairement au Pi d'origine,
@@ -274,47 +226,9 @@ def show_guide_ws(t):
     t.read_key(120)
 
 
-def call_gemini(system_prompt, history):
-    """Appelle l'API Gemini via HTTP brut sans toucher aux fichiers d'origine."""
-    if not GEMINI_API_KEY:
-        raise RuntimeError("GEMINI_KEY/GEMINI_API_KEY non configure")
-
-    contents = []
-    if system_prompt:
-        contents.append({
-            "role": "user",
-            "parts": [{"text": f"[System]\n{system_prompt}"}],
-        })
-    for item in history:
-        role = "user" if item.get("role") == "user" else "model"
-        contents.append({
-            "role": role,
-            "parts": [{"text": item.get("content", "")}],
-        })
-
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-    response = requests.post(
-        url,
-        json={"contents": contents, "generationConfig": {"maxOutputTokens": 700}},
-        timeout=30,
-    )
-    response.raise_for_status()
-    data = response.json()
-    parts = []
-    for candidate in data.get("candidates", []):
-        for part in candidate.get("content", {}).get("parts", []):
-            text = part.get("text", "") if isinstance(part, dict) else ""
-            if text:
-                parts.append(text)
-    if parts:
-        return "".join(parts).strip()
-    raise RuntimeError(f"Reponse Gemini non exploitable: {data}")
-
-
 def run_session(t):
-    """Reprend la boucle de run() d'origine, mais pilotee par un WSTerm."""
-    llm_fn = call_gemini if LLM_PROVIDER == "gemini" else call_llm
-
+    """Boucle de conversation, pilotee par un WSTerm. call_llm() (minitel_chatgpt)
+    aiguille lui-meme vers Mistral/Claude/Gemini selon LLM_PROVIDER."""
     while True:                             # boucle sommaire
         system_prompt, title_msg, question_msg, loading_msg = load_preset()
         system_prompt = with_fixed_date(system_prompt)
@@ -322,7 +236,7 @@ def run_session(t):
         show_home(t, title_msg, question_msg)
 
         while True:                         # boucle conversation
-            question, action = read_question_ws(t)
+            question, action = read_question(t)
             if action == 'guide':
                 show_guide_ws(t); break
             if action == 'repetition':
@@ -351,7 +265,7 @@ def run_session(t):
                                      "brut, utilise ces infos pour repondre precisement) "
                                      ":\n" + ctx)
             try:
-                answer = to_ascii(llm_fn(call_prompt, history))
+                answer = to_ascii(call_llm(call_prompt, history))
                 history.append({"role": "assistant", "content": answer})
             except Exception as e:
                 log.error("API: %s", e)

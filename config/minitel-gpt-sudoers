@@ -1,1 +1,0 @@
-minitel ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart minitel-chatgpt, /usr/bin/systemctl start minitel-chatgpt, /usr/bin/systemctl stop minitel-chatgpt, /usr/bin/systemctl restart wifi-manager, /usr/bin/systemctl restart admin-ui

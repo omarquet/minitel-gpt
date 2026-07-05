@@ -8,9 +8,7 @@ Timeout 5 min sans action → retour sommaire.
 import json
 import os
 import sys
-import time
 import logging
-import subprocess
 import unicodedata
 from pathlib import Path
 from dotenv import load_dotenv
@@ -34,39 +32,38 @@ def to_ascii(s: str) -> str:
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-import serial
-
 # ── Config ───────────────────────────────────────────────────────────────
-def detect_port():
-    for p in ["/dev/ttyUSB0", "/dev/ttyUSB1", "/dev/ttyAMA0", "/dev/serial0"]:
-        if os.path.exists(p):
-            return p
-    return "/dev/ttyUSB0"
-
-PORT = detect_port()
-BAUD = 1200
 COLS = 40
 SCREEN_ROWS = 24
 CONTENT_ROWS = 18          # lignes de contenu par page de réponse
 IDLE_TIMEOUT = 300         # 5 min → retour sommaire
 
 # ── Fournisseur d'IA (LLM) ───────────────────────────────────────────────
-# LLM_PROVIDER = "mistral" (defaut) ou "claude". La cle et le modele de chaque
-# fournisseur sont independants ; on bascule sans perdre l'autre configuration.
+# LLM_PROVIDER = "mistral" (defaut), "claude" ou "gemini". La cle et le
+# modele de chaque fournisseur sont independants ; on bascule sans perdre
+# l'autre configuration.
 PROVIDER = os.getenv("LLM_PROVIDER", "mistral").strip().lower()
 
 MISTRAL_KEY = os.environ.get("MISTRAL_KEY", "")
 MISTRAL_MODEL = os.getenv("MISTRAL_MODEL", "mistral-small-latest")
 MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions"
 
-# Claude (Anthropic) - appele en HTTP brut comme Mistral, sans le SDK (le Pi
-# Zero ARMv6 evite les dependances lourdes a compiler).
+# Claude (Anthropic) - appele en HTTP brut comme Mistral, sans SDK.
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_KEY", "")
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5")
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 
+# Gemini - idem, HTTP brut.
+GEMINI_KEY = os.getenv("GEMINI_KEY") or os.getenv("GEMINI_API_KEY") or ""
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+
 # Modele effectivement utilise (pour les logs)
-MODEL = CLAUDE_MODEL if PROVIDER == "claude" else MISTRAL_MODEL
+if PROVIDER == "claude":
+    MODEL = CLAUDE_MODEL
+elif PROVIDER == "gemini":
+    MODEL = GEMINI_MODEL
+else:
+    MODEL = MISTRAL_MODEL
 PROMPTS_FILE = Path(__file__).parent.parent / "config" / "prompts.json"
 PROMPTS_DEFAULT = Path(__file__).parent.parent / "config" / "prompts.default.json"
 
@@ -111,20 +108,51 @@ def call_claude(system_prompt, history):
                    if b.get("type") == "text").strip()
 
 
+def call_gemini(system_prompt, history):
+    """Appelle l'API Gemini (generateContent) et retourne le texte de reponse."""
+    if not GEMINI_KEY:
+        raise RuntimeError("GEMINI_KEY/GEMINI_API_KEY non configure")
+
+    contents = []
+    if system_prompt:
+        contents.append({
+            "role": "user",
+            "parts": [{"text": f"[System]\n{system_prompt}"}],
+        })
+    for item in history:
+        role = "user" if item.get("role") == "user" else "model"
+        contents.append({
+            "role": role,
+            "parts": [{"text": item.get("content", "")}],
+        })
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_KEY}"
+    r = requests.post(
+        url,
+        json={"contents": contents, "generationConfig": {"maxOutputTokens": 700}},
+        timeout=30,
+    )
+    r.raise_for_status()
+    data = r.json()
+    parts = []
+    for candidate in data.get("candidates", []):
+        for part in candidate.get("content", {}).get("parts", []):
+            text = part.get("text", "") if isinstance(part, dict) else ""
+            if text:
+                parts.append(text)
+    if parts:
+        return "".join(parts).strip()
+    raise RuntimeError(f"Reponse Gemini non exploitable: {data}")
+
+
 def call_llm(system_prompt, history):
     """Aiguille vers le fournisseur configure (LLM_PROVIDER)."""
     if PROVIDER == "claude":
         return call_claude(system_prompt, history)
+    if PROVIDER == "gemini":
+        return call_gemini(system_prompt, history)
     return call_mistral(system_prompt, history)
 
-
-def get_ip():
-    """IP locale (wlan0) pour l'affichage de l'accès admin."""
-    try:
-        out = subprocess.run(["hostname", "-I"], capture_output=True, text=True).stdout
-        return out.split()[0] if out.split() else None
-    except Exception:
-        return None
 
 # Journalisation : toujours sur la sortie standard (capturée par systemd/journald).
 # Le fichier de log est un bonus : s'il n'est pas accessible (droits, FS plein…),
@@ -240,66 +268,6 @@ TITLE_LINES = build_title()
 
 
 # ── Serial helpers ───────────────────────────────────────────────────────
-class Term:
-    def __init__(self):
-        self.s = serial.Serial(PORT, BAUD, bytesize=7, parity="E",
-                               stopbits=1, timeout=0.1)
-        time.sleep(0.3)
-
-    def w(self, data):
-        if isinstance(data, str):
-            data = to_ascii(data).encode("ascii", errors="replace")
-        self.s.write(data)
-
-    def clear(self):
-        self.w(bytes([FF, RS]))
-        time.sleep(0.2)
-
-    def line(self, text=""):
-        self.w(text[:COLS]); self.w(bytes([CR, LF]))
-
-    def center(self, text):
-        text = text[:COLS]
-        self.w(" " * ((COLS - len(text)) // 2)); self.w(text); self.w(bytes([CR, LF]))
-
-    def read_byte(self):
-        b = self.s.read(1)
-        return b[0] if b else None
-
-    def read_key(self, timeout):
-        """Lit une touche. Retourne ('char', c) ou ('fn', code) ou ('timeout', None)."""
-        end = time.time() + timeout
-        while time.time() < end:
-            b = self.read_byte()
-            if b is None:
-                continue
-            if b == SEP:
-                # Mode Videotex (Minitel 1) : SEP + code touche
-                code = self.read_byte()
-                t2 = time.time() + 0.5
-                while code is None and time.time() < t2:
-                    code = self.read_byte()
-                if code is None:
-                    continue          # SEP parasite → ignorer, ne pas bloquer
-                return ('fn', code)
-            if b == ESC:
-                # Mode péri-info (Minitel 2) : touche fonction en VT100 "ESC O x"
-                b2 = self.read_byte()
-                t2 = time.time() + 0.5
-                while b2 is None and time.time() < t2:
-                    b2 = self.read_byte()
-                if b2 == 0x4F:        # 'O' → séquence SS3
-                    code = self.read_byte()
-                    t3 = time.time() + 0.5
-                    while code is None and time.time() < t3:
-                        code = self.read_byte()
-                    if code in SS3_MAP:
-                        return ('fn', SS3_MAP[code])
-                continue              # autre séquence ESC → ignorer
-            return ('char', b)
-        return ('timeout', None)
-
-
 def wrap(text, width=COLS):
     out = []
     for para in text.split("\n"):
@@ -319,7 +287,7 @@ def wrap(text, width=COLS):
 
 
 # ── Écrans ───────────────────────────────────────────────────────────────
-def show_home(t: Term, title_msg, question_msg):
+def show_home(t, title_msg, question_msg):
     t.clear()
     t.w(bytes([CR, LF]))
     t.w(FG_CYAN)
@@ -334,31 +302,13 @@ def show_home(t: Term, title_msg, question_msg):
     t.w(bytes([CR, LF, CR, LF]))      # 1 ligne vide avant la saisie
 
 
-def show_guide(t: Term):
-    """Écran d'aide affiché sur la touche GUIDE : adresse de l'interface d'admin."""
-    ip = get_ip()
-    t.clear()
-    t.w(bytes([CR, LF, CR, LF]))
-    t.w(FG_CYAN); t.center("=== ADMINISTRATION ===")
-    t.w(bytes([CR, LF, CR, LF]))
-    t.w(FG_WHITE)
-    if ip:
-        t.center(f"http://{ip}:8080")
-    else:
-        t.center("Adresse IP indisponible")
-    t.w(bytes([CR, LF, CR, LF]))
-    t.center(f"Mot de passe : {os.getenv('ADMIN_PASSWORD', 'mistral')}")
-    t.w(bytes([CR, LF, CR, LF, CR, LF]))
-    t.w(FG_CYAN); t.center("Une touche pour revenir")
-    t.read_key(120)
-
-
-def read_question(t: Term):
-    """Lit une question. Retourne (texte, 'envoi') / (None,'sommaire') / (None,'timeout')."""
+def read_question(t):
+    """Lit une question. Retourne (texte, 'envoi') / (None,'sommaire') / (None,'guide') /
+    (None,'repetition') / (None,'timeout')."""
     t.w(FG_GREEN)
     t.w("> ")
     buf = []
-    # Le Minitel fait l'écho local des frappes : on ne ré-écho PAS côté Pi.
+    # Le Minitel fait l'écho local des frappes : on ne ré-écho PAS côté serveur.
     while True:
         kind, code = t.read_key(IDLE_TIMEOUT)
         if kind == 'timeout':
@@ -375,6 +325,12 @@ def read_question(t: Term):
                 if buf:
                     buf.pop()
                     t.w(bytes([BS, 0x20, BS]))   # backspace destructif
+            if code == K_ANNUL:
+                if buf:
+                    t.w(bytes([BS, 0x20, BS]) * len(buf))
+                    buf.clear()
+            if code == K_REPET:
+                return None, 'repetition'
             continue
         # caractère
         c = code
@@ -389,7 +345,7 @@ def read_question(t: Term):
             buf.append(chr(c))       # pas d'écho (le Minitel l'affiche)
 
 
-def show_response(t: Term, text: str):
+def show_response(t, text: str):
     """Affiche la réponse en pages. Retourne 'sommaire' / 'done' / 'timeout'."""
     lines = wrap(text)
     pages = [lines[i:i+CONTENT_ROWS] for i in range(0, len(lines), CONTENT_ROWS)] or [[""]]
@@ -415,51 +371,3 @@ def show_response(t: Term, text: str):
     return 'done'
 
 
-# ── Boucle principale ────────────────────────────────────────────────────
-def run():
-    t = Term()
-    log.info(f"Démarré sur {PORT} (fournisseur {PROVIDER}, modèle {MODEL})")
-
-    while True:  # boucle sommaire
-        # Recharger le preset à chaque retour au sommaire (prise en compte des édits)
-        system_prompt, title_msg, question_msg, loading_msg = load_preset()
-        history = []
-        show_home(t, title_msg, question_msg)
-
-        while True:  # boucle conversation
-            question, action = read_question(t)
-            if action == 'guide':
-                show_guide(t)
-                break          # retour au sommaire après l'écran d'aide
-            if action in ('sommaire', 'timeout'):
-                break
-
-            history.append({"role": "user", "content": question})
-            log.info(f"Q: {question!r}")
-
-            t.w(bytes([CR, LF]))
-            t.w(FG_CYAN); t.line(""); t.center(loading_msg)
-            try:
-                answer = call_llm(system_prompt, history)
-                history.append({"role": "assistant", "content": answer})
-                answer = to_ascii(answer)
-            except Exception as e:
-                log.error(f"API: {e}")
-                answer = "Erreur de connexion. Reessayez."
-
-            result = show_response(t, answer)
-            if result in ('sommaire', 'timeout'):
-                break
-
-            # Invite pour rebondir
-            t.w(bytes([CR, LF]))
-            t.w(FG_WHITE)
-            t.center("Repondez ou SOMMAIRE pour finir")
-            t.w(bytes([CR, LF]))
-
-            if len(history) > 20:
-                history = history[-20:]
-
-
-if __name__ == "__main__":
-    run()
