@@ -20,8 +20,10 @@ minitel_chatgpt.py, ce qui garde le depot a jour facilement (git pull).
 import os
 import sys
 import time
+import json
 import logging
 from pathlib import Path
+from datetime import datetime
 
 import requests
 
@@ -70,6 +72,31 @@ WS_TOKEN = os.getenv("WS_TOKEN", "")
 
 def ws_token_valid():
     return not WS_TOKEN or request.args.get("token") == WS_TOKEN
+
+
+# Un LLM ne connait pas la date du jour par lui-meme : pour les presets figes
+# dans le temps (ex. annees80bis), on lui fournit le jour/mois reels ramenes
+# a l'annee configuree via le champ optionnel "fixed_year" du preset actif.
+MOIS_FR = ["janvier", "fevrier", "mars", "avril", "mai", "juin", "juillet",
+           "aout", "septembre", "octobre", "novembre", "decembre"]
+
+
+def active_preset_raw():
+    try:
+        with open(mg.PROMPTS_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return data["presets"].get(data["active"], {})
+    except Exception:
+        return {}
+
+
+def with_fixed_date(system_prompt):
+    fixed_year = active_preset_raw().get("fixed_year")
+    if not fixed_year:
+        return system_prompt
+    now = datetime.now()
+    date_str = f"{now.day} {MOIS_FR[now.month - 1]} {fixed_year}"
+    return system_prompt + f"\n\n[Information systeme] Nous sommes aujourd'hui le {date_str}."
 
 
 class WSClosed(Exception):
@@ -215,6 +242,7 @@ def run_session(t):
 
     while True:                             # boucle sommaire
         system_prompt, title_msg, question_msg, loading_msg = load_preset()
+        system_prompt = with_fixed_date(system_prompt)
         history = []
         show_home(t, title_msg, question_msg)
 
