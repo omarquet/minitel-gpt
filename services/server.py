@@ -43,10 +43,11 @@ from admin_ui import app
 import minitel_chatgpt as mg
 from minitel_chatgpt import (
     load_preset, call_llm, to_ascii, wrap,
-    show_home, read_question, show_response,
+    show_home, show_response,
     COLS, IDLE_TIMEOUT,
-    CR, LF, FF, RS, ESC, SEP,
-    FG_CYAN, FG_WHITE,
+    CR, LF, FF, RS, ESC, SEP, BS,
+    FG_CYAN, FG_WHITE, FG_GREEN,
+    K_ENVOI, K_RETOUR, K_CORR, K_GUIDE, K_SOMMAIRE, K_ANNUL, K_REPET,
     SS3_MAP,
 )
 
@@ -211,6 +212,49 @@ class WSTerm:
         return ('timeout', None)
 
 
+def read_question_ws(t):
+    """Copie de read_question() de minitel_chatgpt.py, avec en plus ANNULATION
+    (efface toute la phrase en cours) et REPETITION (redemande le dernier
+    message affiche). Duplique la logique plutot que de toucher au fichier
+    d'origine."""
+    t.w(FG_GREEN)
+    t.w("> ")
+    buf = []
+    while True:
+        kind, code = t.read_key(IDLE_TIMEOUT)
+        if kind == 'timeout':
+            return None, 'timeout'
+        if kind == 'fn':
+            if code == K_SOMMAIRE:
+                return None, 'sommaire'
+            if code == K_GUIDE:
+                return None, 'guide'
+            if code == K_ENVOI:
+                if buf:
+                    return "".join(buf), 'envoi'
+            if code in (K_CORR, K_RETOUR):
+                if buf:
+                    buf.pop()
+                    t.w(bytes([BS, 0x20, BS]))
+            if code == K_ANNUL:
+                if buf:
+                    t.w(bytes([BS, 0x20, BS]) * len(buf))
+                    buf.clear()
+            if code == K_REPET:
+                return None, 'repetition'
+            continue
+        c = code
+        if c in (CR, LF):
+            if buf:
+                return "".join(buf), 'envoi'
+        elif c in (BS, 0x7F):
+            if buf:
+                buf.pop()
+                t.w(bytes([BS, 0x20, BS]))
+        elif 0x20 <= c <= 0x7E:
+            buf.append(chr(c))
+
+
 def show_guide_ws(t):
     """Ecran GUIDE : sur un VPS l'IP locale n'a pas de sens, on affiche l'URL
     publique de l'admin (ADMIN_PUBLIC_URL). Contrairement au Pi d'origine,
@@ -278,9 +322,20 @@ def run_session(t):
         show_home(t, title_msg, question_msg)
 
         while True:                         # boucle conversation
-            question, action = read_question(t)
+            question, action = read_question_ws(t)
             if action == 'guide':
                 show_guide_ws(t); break
+            if action == 'repetition':
+                last = next((h["content"] for h in reversed(history)
+                             if h["role"] == "assistant"), None)
+                if last is None:
+                    continue
+                if show_response(t, last) in ('sommaire', 'timeout'):
+                    break
+                t.w(bytes([CR, LF])); t.w(FG_WHITE)
+                t.center("Repondez ou SOMMAIRE pour finir")
+                t.w(bytes([CR, LF]))
+                continue
             if action in ('sommaire', 'timeout'):
                 break
 
