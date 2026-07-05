@@ -12,13 +12,14 @@
 
   /* Barre d'outils de test (n'existe pas sur un vrai Minitel) */
   .devbar {
-    width: 100%; max-width: 560px; display: flex; flex-direction: column;
-    gap: 6px; padding: 8px 10px; background: #111214;
-    border: 1px solid #2c2c30; border-radius: 8px; font-size: 12px;
+    width: 100%; max-width: 560px; display: grid;
+    grid-template-columns: 1fr auto auto; gap: 6px; padding: 8px 10px;
+    background: #111214; border: 1px solid #2c2c30; border-radius: 8px;
+    font-size: 12px; align-items: center;
   }
-  .devbar-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .devbar-row { display: contents; }
   .devbar input {
-    flex: 1; min-width: 120px; background: #000; color: #8eff9b;
+    min-width: 120px; background: #000; color: #8eff9b;
     border: 1px solid #2d5f39; border-radius: 4px; padding: 6px 8px;
     font-family: inherit; font-size: 12px;
   }
