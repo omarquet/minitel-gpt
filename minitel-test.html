@@ -6,16 +6,17 @@
   body {
     margin: 0; min-height: 100vh; padding: 24px 12px;
     background: radial-gradient(ellipse at top, #3a3a3d, #1c1c1e 70%);
-    color: #d9ffd9; font-family: ui-monospace, "Courier New", monospace;
+    color: #d9ffd9; font-family: "Courier New", ui-monospace, monospace;
     display: flex; flex-direction: column; align-items: center; gap: 16px;
   }
 
   /* Barre d'outils de test (n'existe pas sur un vrai Minitel) */
   .devbar {
-    width: 100%; max-width: 560px; display: flex; flex-wrap: wrap; gap: 6px;
-    align-items: center; padding: 8px 10px; background: #111214;
+    width: 100%; max-width: 560px; display: flex; flex-direction: column;
+    gap: 6px; padding: 8px 10px; background: #111214;
     border: 1px solid #2c2c30; border-radius: 8px; font-size: 12px;
   }
+  .devbar-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .devbar input {
     flex: 1; min-width: 120px; background: #000; color: #8eff9b;
     border: 1px solid #2d5f39; border-radius: 4px; padding: 6px 8px;
@@ -96,12 +97,16 @@
 </style>
 
 <div class="devbar">
-  <input id="wsUrl" placeholder="wss://mondomaine.fr/ws" />
-  <input id="wsToken" placeholder="token (si WS_TOKEN configuré)" style="flex:0 0 160px" />
-  <button id="connectBtn">Connecter</button>
-  <button id="disconnectBtn" disabled>Déconnecter</button>
-  <button id="clearBtn">Effacer</button>
-  <span class="status" id="status" data-state="off"><span class="status-dot"></span><span id="statusText">Déconnecté</span></span>
+  <div class="devbar-row">
+    <input id="wsUrl" placeholder="wss://mondomaine.fr/ws" />
+    <button id="connectBtn">Connecter</button>
+    <button id="disconnectBtn" disabled>Déconnecter</button>
+  </div>
+  <div class="devbar-row">
+    <input id="wsToken" placeholder="token (si WS_TOKEN configuré)" />
+    <button id="clearBtn">Effacer</button>
+    <span class="status" id="status" data-state="off"><span class="status-dot"></span><span id="statusText">Déconnecté</span></span>
+  </div>
 </div>
 
 <div class="minitel">
