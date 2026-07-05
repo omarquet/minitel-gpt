@@ -1,17 +1,17 @@
 {
-  "active": "annees80bis",
+  "active": "annees80",
   "presets": {
-    "annees80": {
+    "annees80_jim": {
       "label": "Années 80 - Anniversaire",
-      "prompt_file": "annees80.txt",
+      "prompt_file": "annees80_jim.txt",
       "prompt": "",
       "title_msg": "*** BON ANNIVERSAIRE JIM ! ***",
       "question_msg": "Quelle question 80's avez-vous ?",
       "loading_msg": "J'interroge les annees 80 !"
     },
-    "annees80bis": {
+    "annees80": {
       "label": "Années 80",
-      "prompt_file": "annees80bis.txt",
+      "prompt_file": "annees80.txt",
       "prompt": "",
       "fixed_year": 1989,
       "title_msg": "*** BIENVENUE DANS LES ANNEES 80 ***",

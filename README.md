@@ -57,7 +57,8 @@ le même jeton dans `WS_PATH` (voir le firmware).
 
 L'écran affiché sur la touche **GUIDE** ne montre que l'URL de l'admin, jamais
 le mot de passe (contrairement au Pi d'origine, où seul le foyer avait un
-accès physique au Minitel - ici `/ws` est public).
+accès physique au Minitel - ici `/ws` est public). Il permet aussi de changer
+de personnalité active directement depuis le Minitel.
 
 ---
 
@@ -114,9 +115,11 @@ démarrage depuis `config/prompts.default.json`, non versionné), leurs fichiers
 de connaissance dans `config/knowledge/<personnalité>/` - tout ça vit dans le
 volume Docker persistant, pas dans le dépôt git.
 
-> Les boutons de redémarrage/mise à jour de l'admin sont hérités du Pi
-> d'origine (systemd) et n'ont pas d'effet réel en conteneur - les mises à
-> jour se font par redéploiement Coolify après un `git push`.
+> Les personnalités/prompts sont pris en compte immédiatement (relus à chaque
+> conversation). En revanche, changer la clé/le fournisseur LLM dans
+> **Paramètres** ne s'applique au terminal Minitel qu'après un redéploiement
+> Coolify (les mises à jour de code aussi passent par un redéploiement après
+> `git push`, plus de bouton "mettre à jour" dans l'admin).
 
 ---
 
@@ -126,7 +129,7 @@ volume Docker persistant, pas dans le dépôt git.
 |---|---|
 | **ENVOI** | Envoie la question tapée |
 | **SOMMAIRE** | Retour au menu principal (recharge le preset, réinitialise la conversation) |
-| **GUIDE** | Affiche l'URL de l'admin |
+| **GUIDE** | Change de personnalité active (touche numérique), affiche aussi l'URL de l'admin |
 | **RETOUR** / **CORRECTION** | Efface le dernier caractère tapé |
 | **ANNULATION** | Efface toute la phrase en cours de saisie |
 | **REPETITION** | Réaffiche la dernière réponse de l'assistant (sans nouvel appel API) |
@@ -138,8 +141,8 @@ volume Docker persistant, pas dans le dépôt git.
 
 ```
 services/
-  server.py            point d'entrée VPS : admin + WebSocket /ws
-  minitel_chatgpt.py    écrans, lecture clavier, appel LLM (Mistral/Claude/Gemini)
+  server.py             point d'entrée VPS : admin + WebSocket /ws
+  minitel_gpt.py        écrans, lecture clavier, appel LLM (Mistral/Claude/Gemini)
   admin_ui.py           interface web d'admin
 config/
   prompts.default.json  personnalités par défaut (prompts.json créé au 1er boot)

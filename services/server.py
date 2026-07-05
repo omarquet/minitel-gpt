@@ -3,7 +3,7 @@
 server.py - point d'entree unique du service (VPS / Coolify).
 
 Ce fork ne supporte plus le montage Raspberry Pi + port serie de l'origine :
-minitel_chatgpt.py a ete allege de tout ce qui etait specifique au Pi (classe
+minitel_gpt.py a ete allege de tout ce qui etait specifique au Pi (classe
 Term, boucle run() sur /dev/ttyUSB0). Il ne reste que la logique partagee
 (ecrans, LLM, lecture des touches) reutilisee ici via WSTerm.
 
@@ -39,8 +39,8 @@ from flask import send_file, request
 from admin_ui import app
 
 # On reutilise la logique d'ecran / lecture clavier / appel LLM partagee.
-import minitel_chatgpt as mg
-from minitel_chatgpt import (
+import minitel_gpt as mg
+from minitel_gpt import (
     load_preset, call_llm, call_gemini, to_ascii, wrap,
     show_home, read_question, show_response,
     COLS,
@@ -131,7 +131,7 @@ class WSClosed(Exception):
 
 
 class WSTerm:
-    """Meme interface publique que la classe Term de minitel_chatgpt
+    """Meme interface publique que la classe Term de minitel_gpt
     (w / clear / line / center / read_byte / read_key), mais les octets
     circulent sur la WebSocket au lieu du port serie."""
 
@@ -208,26 +208,51 @@ class WSTerm:
 
 
 def show_guide_ws(t):
-    """Ecran GUIDE : sur un VPS l'IP locale n'a pas de sens, on affiche l'URL
-    publique de l'admin (ADMIN_PUBLIC_URL). Contrairement au Pi d'origine,
-    /ws est accessible publiquement : on n'affiche jamais le mot de passe
-    admin ici (n'importe qui pourrait l'obtenir en appuyant sur GUIDE)."""
+    """Ecran GUIDE : choix de la personnalite active (touche numerique), plus
+    l'URL de l'admin en bas d'ecran. Contrairement au Pi d'origine, /ws est
+    accessible publiquement : on n'affiche jamais le mot de passe admin ici
+    (n'importe qui pourrait l'obtenir en appuyant sur GUIDE)."""
+    try:
+        with open(mg.PROMPTS_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        data = {"active": None, "presets": {}}
+    keys = list(data.get("presets", {}).keys())[:9]
+    active = data.get("active")
+
     t.clear()
-    t.w(bytes([CR, LF, CR, LF]))
-    t.w(FG_CYAN); t.center("=== ADMINISTRATION ===")
+    t.w(bytes([CR, LF]))
+    t.w(FG_CYAN); t.center("=== CHOISIR UNE PERSONNALITE ===")
     t.w(bytes([CR, LF, CR, LF])); t.w(FG_WHITE)
+    for i, k in enumerate(keys, start=1):
+        label = data["presets"][k].get("label", k)
+        marker = " (active)" if k == active else ""
+        t.line((f"{i}. {label}{marker}")[:COLS])
+    t.w(bytes([CR, LF]))
+    t.w(FG_CYAN); t.center("Tapez un chiffre pour changer,")
+    t.center("une autre touche pour revenir")
+    t.w(bytes([CR, LF, CR, LF]))
+    t.w(FG_WHITE)
     if ADMIN_URL:
+        t.center("Admin :")
         for chunk in wrap(ADMIN_URL):       # une URL peut depasser 40 colonnes
             t.center(chunk)
-    else:
-        t.center("Voir Coolify pour l'URL admin")
-    t.w(bytes([CR, LF, CR, LF, CR, LF]))
-    t.w(FG_CYAN); t.center("Une touche pour revenir")
-    t.read_key(120)
+
+    kind, code = t.read_key(60)
+    if kind == 'char' and 0x31 <= code <= 0x39:   # '1'..'9'
+        idx = code - 0x31
+        if idx < len(keys) and keys[idx] != active:
+            data["active"] = keys[idx]
+            with open(mg.PROMPTS_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            t.clear()
+            t.w(FG_CYAN); t.center("Personnalite activee :")
+            t.center(data["presets"][keys[idx]].get("label", keys[idx]))
+            time.sleep(1.5)
 
 
 def run_session(t):
-    """Boucle de conversation, pilotee par un WSTerm. call_llm() (minitel_chatgpt)
+    """Boucle de conversation, pilotee par un WSTerm. call_llm() (minitel_gpt)
     aiguille lui-meme vers Mistral/Claude/Gemini selon LLM_PROVIDER."""
     while True:                             # boucle sommaire
         system_prompt, title_msg, question_msg, loading_msg = load_preset()

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Interface d'administration MINITEL GPT - http://<ip>:8080  (mot de passe 13100)
+Interface d'administration MINITEL GPT.
 Navigation par onglets : Tableau de bord · Personnalités · Paramètres.
 """
 import json
@@ -175,23 +175,7 @@ def require_login(f):
         return f(*a, **k)
     return d
 
-# ── Services ─────────────────────────────────────────────────────────────
-def restart_terminal():
-    r = subprocess.run(["sudo", "systemctl", "restart", "minitel-chatgpt"],
-                       capture_output=True, text=True)
-    return r.returncode == 0
-
-def svc_status(name):
-    return subprocess.run(["systemctl", "is-active", name],
-                          capture_output=True, text=True).stdout.strip()
-
-def ip_address():
-    try:
-        out = subprocess.run(["hostname", "-I"], capture_output=True, text=True).stdout
-        return out.split()[0] if out.split() else "?"
-    except Exception:
-        return "?"
-
+# ── Logs ─────────────────────────────────────────────────────────────────
 def log_tail(name, n=40):
     f = LOGS_DIR / f"{name}.log"
     if not f.exists():
@@ -201,78 +185,6 @@ def log_tail(name, n=40):
                               capture_output=True, text=True).stdout
     except Exception as e:
         return str(e)
-
-# ── Mise à jour de l'application (git) ────────────────────────────────────
-LAST_VERSION_FILE = PROJ_DIR / ".last_version"
-
-def git(*args, timeout=60):
-    """Exécute git dans le dossier projet. Retourne (rc, stdout, stderr)."""
-    try:
-        r = subprocess.run(["git", "-C", str(PROJ_DIR), *args],
-                           capture_output=True, text=True, timeout=timeout)
-        return r.returncode, r.stdout.strip(), r.stderr.strip()
-    except Exception as e:
-        return 1, "", str(e)
-
-def git_ready():
-    rc, out, _ = git("rev-parse", "--is-inside-work-tree")
-    return rc == 0 and out == "true"
-
-def current_version():
-    if not git_ready():
-        return "(non versionné)"
-    rc, out, _ = git("log", "-1", "--format=%h · %cd · %s",
-                     "--date=format:%d/%m/%Y %H:%M")
-    return out or "(inconnue)"
-
-def check_update():
-    """git fetch puis compare HEAD à origin/main. Retourne un dict."""
-    if not git_ready():
-        return {"ok": False, "msg": "Le code n'est pas un dépôt git sur le Pi."}
-    rc, _, err = git("fetch", "origin", "main")
-    if rc != 0:
-        return {"ok": False, "msg": "Échec de la vérification (Internet ?) : " + err}
-    rc, behind, _ = git("rev-list", "--count", "HEAD..origin/main")
-    n = int(behind) if behind.isdigit() else 0
-    _, log, _ = git("log", "--format=%h  %s", "HEAD..origin/main")
-    return {"ok": True, "behind": n, "log": log}
-
-def restart_all():
-    """Redémarre le terminal, puis l'admin de façon détachée (pour que la
-    réponse HTTP parte avant que ce process ne soit tué)."""
-    subprocess.run(["sudo", "systemctl", "restart", "minitel-chatgpt"],
-                   capture_output=True, text=True)
-    subprocess.Popen(["bash", "-c", "sleep 2; sudo systemctl restart admin-ui"],
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                     start_new_session=True)
-
-def do_update():
-    """Met à jour le code depuis origin/main puis redémarre les services."""
-    if not git_ready():
-        return False, "Le code n'est pas un dépôt git sur le Pi."
-    rc, prev, _ = git("rev-parse", "HEAD")
-    rc, _, err = git("fetch", "origin", "main")
-    if rc != 0:
-        return False, "Échec fetch : " + err
-    rc, out, err = git("reset", "--hard", "origin/main")
-    if rc != 0:
-        return False, "Échec reset : " + (err or out)
-    if prev:
-        LAST_VERSION_FILE.write_text(prev)
-    ensure_prompts()
-    restart_all()
-    return True, out
-
-def do_rollback():
-    if not git_ready() or not LAST_VERSION_FILE.exists():
-        return False, "Aucune version précédente enregistrée."
-    prev = LAST_VERSION_FILE.read_text().strip()
-    rc, out, err = git("reset", "--hard", prev)
-    if rc != 0:
-        return False, "Échec : " + (err or out)
-    ensure_prompts()
-    restart_all()
-    return True, out
 
 # ── Génération de prompt par IA ──────────────────────────────────────────
 def generate_prompt(description):
@@ -443,17 +355,6 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 <!-- TABLEAU DE BORD -->
 <section class="panel active" id=dash>
   <div class=block>
-    <h2>État du Pi</h2>
-    <p class=ipbox>Adresse : <b>http://{{ip}}:8080</b></p>
-    {% for s,st in services.items() %}
-    <div class=row><span class="dot {{'on' if st=='active' else 'off'}}"></span>{{s}}
-      <span style="margin-left:auto;color:{{'#4ecdc4' if st=='active' else '#667'}}">{{st}}</span></div>
-    {% endfor %}
-    <form method=POST action=/restart style=margin-top:10px>
-      <button class="btn btn-s">↺ Redémarrer le terminal</button></form>
-    <p class=sub>« inactive » sur wifi/boot = normal (services ponctuels).</p>
-  </div>
-  <div class=block>
     <h2>Personnalités disponibles</h2>
     <p class=sub>La personnalité active est celle utilisée par le Minitel.</p>
     <ul class=plist>
@@ -580,27 +481,8 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
       <hr>
       <button class="btn btn-p">💾 Enregistrer la configuration</button>
     </form>
-    <p class=sub style=margin-top:10px>Adresse de l'admin : consultable sur le Minitel via la touche <b>Guide</b>.</p>
-  </div>
-  <div class=block>
-    <h2>🔄 Mise à jour de l'application</h2>
-    <p class=sub>Version installée : <b>{{version}}</b></p>
-    <form method=POST action=/check-update style=margin:0>
-      <button class="btn btn-s">Vérifier les mises à jour</button>
-    </form>
-    {% if update_log %}
-    <hr>
-    <p class=sub>Nouveautés disponibles :</p>
-    <pre>{{update_log}}</pre>
-    <form method=POST action=/update onsubmit="return confirm('Mettre à jour le code et redémarrer les services ?')">
-      <button class="btn btn-p">⬇ Mettre à jour maintenant</button>
-    </form>
-    {% endif %}
-    <hr>
-    <form method=POST action=/rollback onsubmit="return confirm('Revenir à la version précédente ?')" style=margin:0>
-      <button class="btn btn-d">↶ Revenir à la version précédente</button>
-    </form>
-    <p class=sub style=margin-top:8px>La mise à jour récupère le code depuis GitHub. Tes personnalités, clés et fichiers de connaissance ne sont pas touchés.</p>
+    <p class=sub style=margin-top:10px>La touche <b>Guide</b> du Minitel permet de changer de personnalité
+      directement depuis le terminal, et affiche aussi l'adresse de cet admin.</p>
   </div>
   <div class=block>
     <h2>Logs du terminal <a href=/ class=sub style=margin-left:8px>rafraîchir</a></h2>
@@ -713,20 +595,16 @@ def logout():
 def index():
     data = load_prompts()
     presets = normalized_presets(data)
-    services = {"minitel-chatgpt": svc_status("minitel-chatgpt"),
-                "wifi-manager": svc_status("wifi-manager"),
-                "admin-ui": svc_status("admin-ui")}
     flash = session.pop("flash", None); flash_ok = session.pop("flash_ok", False)
     return render_template_string(
         ADMIN_HTML, presets=presets, presets_json=json.dumps(presets),
         knowledge_json=json.dumps(all_knowledge()),
-        active_key=data["active"], services=services, ip=ip_address(),
+        active_key=data["active"],
         log_chatgpt=log_tail("chatgpt"),
         provider=llm_provider(),
         mistral_key_masked=mask_key(mistral_key()), mistral_model=mistral_model(),
         claude_key_masked=mask_key(anthropic_key()), claude_model=claude_model(),
         mistral_models=MISTRAL_MODELS, claude_models=CLAUDE_MODELS,
-        version=current_version(), update_log=session.pop("update_log", None),
         flash=flash, flash_ok=flash_ok)
 
 @app.route("/save-prompt", methods=["POST"])
@@ -743,8 +621,6 @@ def save_prompt():
     if sp:
         p["prompt"] = sp
     save_prompts(data)
-    if k == data["active"]:
-        restart_terminal()
     session["flash"] = f"Personnalité '{p['label']}' enregistrée."
     session["flash_ok"] = True
     return redirect(url_for("index"))
@@ -765,7 +641,6 @@ def apply_preset():
                 p["prompt"] = request.form.get("prompt").strip()
         data["active"] = k
         save_prompts(data)
-        restart_terminal()
         session["flash"] = f"Personnalité '{p.get('label', k)}' activée."
         session["flash_ok"] = True
     return redirect(url_for("index"))
@@ -800,7 +675,7 @@ def delete_preset():
         del data["presets"][k]
         if data["active"] == k:
             data["active"] = next(iter(data["presets"]))
-            save_prompts(data); restart_terminal()
+            save_prompts(data)
         else:
             save_prompts(data)
         session["flash"] = "Personnalité supprimée."; session["flash_ok"] = True
@@ -864,7 +739,6 @@ def save_llm():
     if cm in CLAUDE_MODEL_IDS:
         write_env_key("CLAUDE_MODEL", cm)
 
-    restart_terminal()
     label = "Claude" if provider == "claude" else "Mistral"
     missing = (provider == "claude" and not anthropic_key()) or \
               (provider == "mistral" and not mistral_key())
@@ -872,7 +746,9 @@ def save_llm():
         session["flash"] = f"Configuration enregistrée (fournisseur : {label}), mais aucune clé API n'est définie pour ce fournisseur."
         session["flash_ok"] = False
     else:
-        session["flash"] = f"Configuration enregistrée (fournisseur : {label}) et terminal redémarré."
+        session["flash"] = (f"Configuration enregistrée (fournisseur : {label}). "
+                            "Redéploie le service pour que le terminal Minitel en tienne compte "
+                            "(déjà pris en compte immédiatement pour le test/la génération de prompt ci-dessus).")
         session["flash_ok"] = True
     return redirect(url_for("index"))
 
@@ -896,8 +772,6 @@ def upload_knowledge():
             name += ".txt"
         f.save(str(folder / name))
         n += 1
-    if key == data["active"]:
-        restart_terminal()
     session["flash"] = f"{n} fichier(s) ajouté(s) à « {data['presets'][key].get('label', key)} »." if n else "Aucun fichier .txt valide."
     session["flash_ok"] = bool(n)
     return redirect(url_for("index"))
@@ -910,55 +784,10 @@ def delete_knowledge():
     target = KNOWLEDGE_DIR / key / fn
     if fn and target.is_file():
         target.unlink()
-        if key == load_prompts()["active"]:
-            restart_terminal()
         session["flash"] = f"Fichier {fn} supprimé."; session["flash_ok"] = True
     else:
         session["flash"] = "Fichier introuvable."; session["flash_ok"] = False
     return redirect(url_for("index"))
-
-@app.route("/restart", methods=["POST"])
-@require_login
-def restart():
-    ok = restart_terminal()
-    session["flash"] = "Terminal redémarré." if ok else "Échec (sudo requis)."
-    session["flash_ok"] = ok
-    return redirect(url_for("index"))
-
-@app.route("/check-update", methods=["POST"])
-@require_login
-def check_update_route():
-    res = check_update()
-    if not res["ok"]:
-        session["flash"] = res["msg"]; session["flash_ok"] = False
-    elif res["behind"] == 0:
-        session["flash"] = "L'application est à jour."; session["flash_ok"] = True
-        session.pop("update_log", None)
-    else:
-        session["update_log"] = res["log"]
-        session["flash"] = f"{res['behind']} mise(s) à jour disponible(s)."
-        session["flash_ok"] = True
-    return redirect(url_for("index"))
-
-@app.route("/update", methods=["POST"])
-@require_login
-def update_route():
-    ok, msg = do_update()
-    session.pop("update_log", None)
-    session["flash"] = ("Mise à jour appliquée - les services redémarrent (recharge la page dans ~10 s)."
-                        if ok else "Échec de la mise à jour : " + msg)
-    session["flash_ok"] = ok
-    return redirect(url_for("index"))
-
-@app.route("/rollback", methods=["POST"])
-@require_login
-def rollback_route():
-    ok, msg = do_rollback()
-    session["flash"] = ("Version précédente restaurée - redémarrage en cours."
-                        if ok else "Échec : " + msg)
-    session["flash_ok"] = ok
-    return redirect(url_for("index"))
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080, debug=False)
