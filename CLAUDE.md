@@ -30,10 +30,15 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> Coolify/Traefik --> con
 - `docker-compose.yml` — pour Coolify, volume `minitel-config` persistant.
 - `firmware/minitel_esp32_bridge.ino` — firmware ESP32 : UART2 en `SERIAL_7E1`
   (1200 bauds) <-> WebSocket client (lib WebSockets de Links2004). Relais brut.
-- `minitel-emulator.html` — émulateur Minitel navigateur qui parle le MÊME
-  protocole WebSocket binaire que l'ESP32 (rendu Videotex 40 col, touches SEP).
-  Sert à tester SANS matériel.
+- `minitel-test.html` — émulateur Minitel navigateur qui parle le MÊME
+  protocole WebSocket binaire que l'ESP32 (rendu Videotex 40 col, touches SEP)
+  sur `/ws`. Sert à tester SANS matériel (remplace l'ancien
+  `minitel-emulator.html`, supprimé).
 - `DEPLOY.md` — guide de déploiement Coolify pas à pas.
+- Support **Gemini** dans `server.py` (`LLM_PROVIDER=gemini`, appel HTTP direct
+  sans dépendance), plus deux endpoints WS de test légers : `/ws-echo` (renvoie
+  ce qu'il reçoit) et `/ws-gemini` (chat Gemini minimal, sans la boucle complète
+  de `minitel_chatgpt.py`).
 
 ## Points techniques importants / pièges
 
@@ -52,7 +57,8 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> Coolify/Traefik --> con
 
 ## Variables d'environnement (Coolify)
 
-`LLM_PROVIDER`, `MISTRAL_KEY`, `MISTRAL_MODEL`, `ANTHROPIC_KEY`, `CLAUDE_MODEL`,
+`LLM_PROVIDER` (`mistral`, `claude` ou `gemini`), `MISTRAL_KEY`, `MISTRAL_MODEL`,
+`ANTHROPIC_KEY`, `CLAUDE_MODEL`, `GEMINI_KEY`, `GEMINI_MODEL`,
 `ADMIN_PASSWORD`, `FLASK_SECRET`, `ADMIN_PUBLIC_URL`.
 
 ## Statut actuel
@@ -60,7 +66,7 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> Coolify/Traefik --> con
 - [x] Refactor transport + `server.py` validé (import + session simulée + stack
       réel gunicorn/flask-sock testés : accueil, pagination, touches OK).
 - [x] Fork créé : https://github.com/omarquet/minitel-gpt
-- [ ] Fichiers poussés sur le fork (git add/commit/push).
+- [x] Fichiers poussés sur le fork (git add/commit/push).
 - [ ] Test local `docker compose up --build` + émulateur.
 - [ ] Déploiement Coolify (domaine + port 8080 + variables d'env).
 - [ ] Montage matériel ESP32 + level shifter, flash du firmware.

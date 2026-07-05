@@ -28,14 +28,15 @@ Emplacements attendus :
 - `services/server.py`
 - `Dockerfile`, `entrypoint.sh`, `requirements.txt`, `docker-compose.yml` (racine)
 - `firmware/minitel_esp32_bridge.ino`
-- `minitel-emulator.html` (racine, sert au test navigateur)
+- `minitel-test.html` (racine, sert au test navigateur)
 
 ## 3. Coolify
 
 1. New Resource → Docker Compose (ou Dockerfile), source = ton fork.
 2. Environment :
-   - `LLM_PROVIDER=mistral`
+   - `LLM_PROVIDER=mistral` (ou `claude` / `gemini`)
    - `MISTRAL_KEY=...`  `MISTRAL_MODEL=mistral-small-latest`
+   - `GEMINI_KEY=...`  `GEMINI_MODEL=gemini-2.0-flash` (si `LLM_PROVIDER=gemini`)
    - `ADMIN_PASSWORD=...`  `FLASK_SECRET=...`
    - `ADMIN_PUBLIC_URL=https://minitel.tondomaine.fr`
 3. Domaine `minitel.tondomaine.fr`, port exposé **8080** (Traefik gère TLS + WebSocket).
@@ -49,7 +50,7 @@ En local :
 ```bash
 docker compose up --build
 ```
-Ouvre `minitel-emulator.html`, URL `ws://localhost:8080/ws`, clique **Connecter**.
+Ouvre `minitel-test.html`, URL `ws://localhost:8080/ws`, clique **Connecter**.
 Tape une question, **Entrée** = ENVOI ; boutons SUITE / SOMMAIRE / GUIDE.
 
 Une fois sur Coolify, pointe l'émulateur sur `wss://minitel.tondomaine.fr/ws`
