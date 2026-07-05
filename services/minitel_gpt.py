@@ -214,14 +214,56 @@ log = logging.getLogger(__name__)
 
 # ── Codes Videotex ───────────────────────────────────────────────────────
 ESC, SO, SI, RS, FF, CR, LF, SEP, BS = 0x1B,0x0E,0x0F,0x1E,0x0C,0x0D,0x0A,0x13,0x08
-FG_WHITE  = bytes([ESC,0x47])
-FG_CYAN   = bytes([ESC,0x46])
-FG_YELLOW = bytes([ESC,0x43])
-FG_GREEN  = bytes([ESC,0x42])
-BG_BLACK  = bytes([ESC,0x50])
-DBL_HEIGHT= bytes([ESC,0x4C])   # double hauteur
-DBL_SIZE  = bytes([ESC,0x4F])   # double hauteur+largeur
-SZ_NORMAL = bytes([ESC,0x4C-0x0C])  # 0x40 normal (placeholder)
+# Couleurs de texte (ESC + 0x40-0x47, norme Videotex/Teletel).
+FG_BLACK   = bytes([ESC,0x40])
+FG_RED     = bytes([ESC,0x41])
+FG_GREEN   = bytes([ESC,0x42])
+FG_YELLOW  = bytes([ESC,0x43])
+FG_BLUE    = bytes([ESC,0x44])
+FG_MAGENTA = bytes([ESC,0x45])
+FG_CYAN    = bytes([ESC,0x46])
+FG_WHITE   = bytes([ESC,0x47])
+BG_BLACK   = bytes([ESC,0x50])
+# Taille de caractere (ESC + 0x4C-0x4F). SZ_NORMAL et DBL_HEIGHT etaient
+# mal etiquetes avant verification aupres de la norme (0x4C = taille
+# normale, pas double hauteur).
+SZ_NORMAL  = bytes([ESC,0x4C])   # taille normale
+DBL_HEIGHT = bytes([ESC,0x4D])   # double hauteur
+DBL_WIDTH  = bytes([ESC,0x4E])   # double largeur
+DBL_SIZE   = bytes([ESC,0x4F])   # double hauteur+largeur
+
+# Mise en forme legere pour les reponses du LLM : convention a nous (pas un
+# standard), traduite en vrais codes Videotex. {/} reinitialise couleur et
+# taille. Voir MARKUP_INSTRUCTIONS pour la consigne donnee au LLM.
+MINITEL_MARKUP_TAGS = {
+    "rouge": FG_RED, "vert": FG_GREEN, "jaune": FG_YELLOW, "bleu": FG_BLUE,
+    "magenta": FG_MAGENTA, "cyan": FG_CYAN, "blanc": FG_WHITE,
+    "grand": DBL_SIZE,
+}
+MINITEL_MARKUP_RESET = FG_WHITE + SZ_NORMAL
+_MINITEL_MARKUP_RE = re.compile(r"\{(/|[a-z]+)\}")
+
+MARKUP_INSTRUCTIONS = (
+    "\n\nMise en forme disponible (a utiliser avec parcimonie, pour "
+    "souligner un mot ou une phrase clef, jamais pour tout le texte) : "
+    "{rouge}...{/}, {vert}...{/}, {jaune}...{/}, {bleu}...{/}, "
+    "{magenta}...{/}, {cyan}...{/}, {blanc}...{/} pour changer la couleur, "
+    "{grand}...{/} pour un texte en double hauteur/largeur. "
+    "Toujours refermer avec {/}. N'utilise RIEN d'autre comme mise en forme."
+)
+
+
+def apply_minitel_markup(text):
+    """Traduit {rouge}...{/}, {grand}...{/} etc. en codes Videotex reels."""
+    if not text:
+        return text
+    def repl(m):
+        tag = m.group(1)
+        if tag == "/":
+            return MINITEL_MARKUP_RESET.decode("latin1")
+        code = MINITEL_MARKUP_TAGS.get(tag)
+        return code.decode("latin1") if code else ""
+    return _MINITEL_MARKUP_RE.sub(repl, text)
 
 # Touches de fonction Minitel (SEP + code)
 K_ENVOI=0x41; K_RETOUR=0x42; K_REPET=0x43; K_GUIDE=0x44
@@ -278,11 +320,10 @@ def load_preset():
             prompt += ("\n\nCONNAISSANCES DE REFERENCE (utilise ces informations "
                        "en priorite pour repondre) :\n" + knowledge)
         prompt += ("\n\nContrainte technique absolue : tu t'affiches sur un ecran "
-                   "Minitel qui ne sait afficher QUE du texte brut. N'utilise "
+                   "Minitel qui ne sait pas afficher le Markdown. N'utilise "
                    "JAMAIS de syntaxe Markdown (pas de **gras**, *italique*, "
                    "# titres, listes a puces avec * ou -, blocs de code avec "
-                   "des accents graves, liens [texte](url)) : ecris uniquement "
-                   "du texte simple.")
+                   "des accents graves, liens [texte](url))." + MARKUP_INSTRUCTIONS)
         return (
             prompt,
             p.get("title_msg", "*** MINITEL GPT ***"),
@@ -314,6 +355,31 @@ TITLE_LINES = build_title()
 
 
 # ── Serial helpers ───────────────────────────────────────────────────────
+def visible_len(s):
+    """Longueur affichee : les sequences ESC+octet (couleur/taille) ont une
+    largeur nulle a l'ecran, contrairement a un caractere normal."""
+    n, i = 0, 0
+    while i < len(s):
+        if s[i] == chr(ESC) and i + 1 < len(s):
+            i += 2
+            continue
+        n += 1
+        i += 1
+    return n
+
+
+def visible_truncate(s, width):
+    """Tronque a `width` caracteres AFFICHES, en preservant les sequences
+    ESC+octet rencontrees en cours de route (jamais coupees en deux)."""
+    out, n, i = [], 0, 0
+    while i < len(s) and n < width:
+        if s[i] == chr(ESC) and i + 1 < len(s):
+            out.append(s[i:i + 2]); i += 2
+            continue
+        out.append(s[i]); n += 1; i += 1
+    return "".join(out)
+
+
 def wrap(text, width=COLS):
     out = []
     for para in text.split("\n"):
@@ -322,11 +388,12 @@ def wrap(text, width=COLS):
             continue
         cur = ""
         for word in para.split():
-            if len(cur) + len(word) + (1 if cur else 0) <= width:
+            extra = 1 if cur else 0
+            if visible_len(cur) + visible_len(word) + extra <= width:
                 cur = (cur + " " + word).strip()
             else:
                 out.append(cur)
-                cur = word[:width]
+                cur = visible_truncate(word, width)
         if cur:
             out.append(cur)
     return out

@@ -41,7 +41,8 @@ from admin_ui import app
 # On reutilise la logique d'ecran / lecture clavier / appel LLM partagee.
 import minitel_gpt as mg
 from minitel_gpt import (
-    load_preset, call_llm, call_gemini, to_ascii, strip_markdown, wrap,
+    load_preset, call_llm, call_gemini, to_ascii, strip_markdown,
+    apply_minitel_markup, visible_len, visible_truncate, wrap,
     show_home, read_question, show_response,
     COLS,
     CR, LF, FF, RS, ESC, SEP,
@@ -155,11 +156,11 @@ class WSTerm:
         time.sleep(0.05)
 
     def line(self, text=""):
-        self.w(text[:COLS]); self.w(bytes([CR, LF]))
+        self.w(visible_truncate(text, COLS)); self.w(bytes([CR, LF]))
 
     def center(self, text):
-        text = text[:COLS]
-        self.w(" " * ((COLS - len(text)) // 2)); self.w(text); self.w(bytes([CR, LF]))
+        text = visible_truncate(text, COLS)
+        self.w(" " * ((COLS - visible_len(text)) // 2)); self.w(text); self.w(bytes([CR, LF]))
 
     # ----- lecture (Minitel -> Pi) -----
     def read_byte(self):
@@ -269,7 +270,7 @@ def run_session(t):
                              if h["role"] == "assistant"), None)
                 if last is None:
                     continue
-                if show_response(t, last) in ('sommaire', 'timeout'):
+                if show_response(t, apply_minitel_markup(last)) in ('sommaire', 'timeout'):
                     break
                 t.w(bytes([CR, LF])); t.w(FG_WHITE)
                 t.center("Repondez ou SOMMAIRE pour finir")
@@ -296,7 +297,7 @@ def run_session(t):
                 log.error("API: %s", e)
                 answer = "Erreur de connexion. Reessayez."
 
-            if show_response(t, answer) in ('sommaire', 'timeout'):
+            if show_response(t, apply_minitel_markup(answer)) in ('sommaire', 'timeout'):
                 break
 
             t.w(bytes([CR, LF])); t.w(FG_WHITE)

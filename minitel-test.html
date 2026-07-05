@@ -67,6 +67,7 @@
   let ws = null;
   let grid = [];
   let curColor = 7;
+  let curSize = 'normal';
   let cr = 0;
   let cc = 0;
   let esc = false;
@@ -91,8 +92,9 @@
   }
 
   function initGrid() {
-    grid = Array.from({ length: ROWS }, () => Array.from({ length: COLS }, () => ({ ch: ' ', col: 7 })));
+    grid = Array.from({ length: ROWS }, () => Array.from({ length: COLS }, () => ({ ch: ' ', col: 7, size: 'normal' })));
     curColor = 7;
+    curSize = 'normal';
     cr = 0;
     cc = 0;
     esc = false;
@@ -103,13 +105,24 @@
     return ESCAPE_MAP[ch] || ch;
   }
 
+  // Approximation visuelle : le vrai Minitel etale un caractere double
+  // hauteur sur 2 lignes physiques ; ici on se contente d'un scale() CSS
+  // (peut chevaucher la ligne suivante), suffisant pour verifier que le
+  // LLM utilise bien la mise en forme.
+  const SIZE_TRANSFORM = {
+    normal: '', height: 'scaleY(2)', width: 'scaleX(2)', both: 'scale(2)',
+  };
+
   function render() {
     let html = '';
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
         const cell = grid[r][c];
         const ch = cell.ch === ' ' ? '\u00a0' : escapeHtml(cell.ch);
-        html += `<span style="color:${PALETTE[cell.col]}">${ch}</span>`;
+        const transform = SIZE_TRANSFORM[cell.size] || '';
+        const style = `color:${PALETTE[cell.col]}` +
+          (transform ? `;display:inline-block;transform:${transform};transform-origin:left` : '');
+        html += `<span style="${style}">${ch}</span>`;
       }
       html += '\n';
     }
@@ -118,21 +131,24 @@
 
   function scrollUp() {
     grid.shift();
-    grid.push(Array.from({ length: COLS }, () => ({ ch: ' ', col: 7 })));
+    grid.push(Array.from({ length: COLS }, () => ({ ch: ' ', col: 7, size: 'normal' })));
   }
 
   function putChar(ch) {
     if (cc >= COLS) { cc = 0; cr++; }
     if (cr >= ROWS) { scrollUp(); cr = ROWS - 1; }
-    grid[cr][cc] = { ch, col: curColor };
+    grid[cr][cc] = { ch, col: curColor, size: curSize };
     cc++;
   }
+
+  const SIZE_MAP = { 0x4C: 'normal', 0x4D: 'height', 0x4E: 'width', 0x4F: 'both' };
 
   function feed(bytes) {
     for (const b of bytes) {
       if (esc) {
         esc = false;
         if (b >= 0x40 && b <= 0x47) curColor = b - 0x40;
+        else if (b in SIZE_MAP) curSize = SIZE_MAP[b];
         continue;
       }
       switch (b) {
