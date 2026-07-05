@@ -355,28 +355,43 @@ TITLE_LINES = build_title()
 
 
 # ── Serial helpers ───────────────────────────────────────────────────────
+# Sur le vrai Minitel, un caractere en double largeur occupe 2 des 40
+# colonnes (pas 1) : ESC+0x4E (double largeur) et 0x4F (double grandeur)
+# passent la largeur de colonne a 2 ; 0x4C (normal) et 0x4D (double
+# hauteur seule, ne touche pas la largeur) la remettent/laissent a 1.
+_COLUMN_WIDTH_BY_SIZE_BYTE = {0x4C: 1, 0x4D: 1, 0x4E: 2, 0x4F: 2}
+
+
 def visible_len(s):
-    """Longueur affichee : les sequences ESC+octet (couleur/taille) ont une
-    largeur nulle a l'ecran, contrairement a un caractere normal."""
-    n, i = 0, 0
+    """Longueur affichee en colonnes : les sequences ESC+octet (couleur/
+    taille) ont une largeur nulle, et un caractere en double largeur
+    compte pour 2 colonnes tant que le mode n'est pas remis a normal."""
+    n, i, col_width = 0, 0, 1
     while i < len(s):
         if s[i] == chr(ESC) and i + 1 < len(s):
+            b = ord(s[i + 1])
+            if b in _COLUMN_WIDTH_BY_SIZE_BYTE:
+                col_width = _COLUMN_WIDTH_BY_SIZE_BYTE[b]
             i += 2
             continue
-        n += 1
+        n += col_width
         i += 1
     return n
 
 
 def visible_truncate(s, width):
-    """Tronque a `width` caracteres AFFICHES, en preservant les sequences
-    ESC+octet rencontrees en cours de route (jamais coupees en deux)."""
-    out, n, i = [], 0, 0
+    """Tronque a `width` COLONNES affichees (double largeur = 2 colonnes),
+    en preservant les sequences ESC+octet rencontrees en cours de route
+    (jamais coupees en deux)."""
+    out, n, i, col_width = [], 0, 0, 1
     while i < len(s) and n < width:
         if s[i] == chr(ESC) and i + 1 < len(s):
+            b = ord(s[i + 1])
+            if b in _COLUMN_WIDTH_BY_SIZE_BYTE:
+                col_width = _COLUMN_WIDTH_BY_SIZE_BYTE[b]
             out.append(s[i:i + 2]); i += 2
             continue
-        out.append(s[i]); n += 1; i += 1
+        out.append(s[i]); n += col_width; i += 1
     return "".join(out)
 
 
@@ -388,9 +403,12 @@ def wrap(text, width=COLS):
             continue
         cur = ""
         for word in para.split():
-            extra = 1 if cur else 0
-            if visible_len(cur) + visible_len(word) + extra <= width:
-                cur = (cur + " " + word).strip()
+            # Mesure la ligne candidate d'un seul tenant (pas cur et word
+            # separement) pour que l'etat couleur/taille se propage bien
+            # d'un mot au suivant (ex. {grand}mot1 mot2{/} sur 2 mots).
+            candidate = (cur + " " + word).strip() if cur else word
+            if visible_len(candidate) <= width:
+                cur = candidate
             else:
                 out.append(cur)
                 cur = visible_truncate(word, width)
