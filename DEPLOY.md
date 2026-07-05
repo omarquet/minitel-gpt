@@ -39,6 +39,9 @@ Emplacements attendus :
    - `GEMINI_KEY=...`  `GEMINI_MODEL=gemini-2.0-flash` (si `LLM_PROVIDER=gemini`)
    - `ADMIN_PASSWORD=...`  `FLASK_SECRET=...`
    - `ADMIN_PUBLIC_URL=https://minitel.tondomaine.fr`
+   - `WS_TOKEN=...` (recommandé) : sans ça, `/ws` est ouvert à qui connaît
+     l'URL et peut consommer ta clé API. Avec un token, l'ESP32 et tes tests
+     doivent ajouter `?token=...` à l'URL WebSocket.
 3. Domaine `minitel.tondomaine.fr`, port exposé **8080** (Traefik gère TLS + WebSocket).
 4. Déploie.
    - Admin : `https://minitel.tondomaine.fr/`

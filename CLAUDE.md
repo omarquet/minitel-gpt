@@ -54,12 +54,17 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> Coolify/Traefik --> con
   (pas de systemd) ; les mises à jour se font par redéploiement Coolify. Les
   personnalités/prompts se rechargent à chaud à chaque retour au sommaire ; la
   clé/le provider LLM viennent des variables d'env (redéploiement pour changer).
+- **Sécurité `/ws`** : par défaut, aucune authentification — n'importe qui
+  connaissant l'URL publique peut discuter et consommer la clé API. Si
+  `WS_TOKEN` est configuré côté serveur, `/ws`, `/ws-echo` et `/ws-gemini`
+  exigent `?token=...` en query string (sinon connexion refusée en silence).
+  L'ESP32 doit inclure le même token dans `WS_PATH` (voir le `.ino`).
 
 ## Variables d'environnement (Coolify)
 
 `LLM_PROVIDER` (`mistral`, `claude` ou `gemini`), `MISTRAL_KEY`, `MISTRAL_MODEL`,
 `ANTHROPIC_KEY`, `CLAUDE_MODEL`, `GEMINI_KEY`, `GEMINI_MODEL`,
-`ADMIN_PASSWORD`, `FLASK_SECRET`, `ADMIN_PUBLIC_URL`.
+`ADMIN_PASSWORD`, `FLASK_SECRET`, `ADMIN_PUBLIC_URL`, `WS_TOKEN`.
 
 ## Statut actuel
 

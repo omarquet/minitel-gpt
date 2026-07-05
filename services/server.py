@@ -29,7 +29,7 @@ import requests
 sys.path.insert(0, str(Path(__file__).parent))
 
 from flask_sock import Sock
-from flask import send_file
+from flask import send_file, request
 
 # App Flask d'admin existante (expose `app` au niveau module, port 8080 d'origine).
 from admin_ui import app
@@ -61,6 +61,15 @@ ADMIN_URL = os.getenv("ADMIN_PUBLIC_URL", "")
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "mistral").strip().lower()
 GEMINI_API_KEY = os.getenv("GEMINI_KEY") or os.getenv("GEMINI_API_KEY") or ""
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+
+# Jeton partage protegeant les endpoints WebSocket (appelle une API payante) :
+# ?token=... dans l'URL, compare a WS_TOKEN. Si WS_TOKEN est vide, aucune
+# verification n'est faite (comportement d'origine, pratique en dev local).
+WS_TOKEN = os.getenv("WS_TOKEN", "")
+
+
+def ws_token_valid():
+    return not WS_TOKEN or request.args.get("token") == WS_TOKEN
 
 
 class WSClosed(Exception):
@@ -240,6 +249,9 @@ def run_session(t):
 
 @sock.route("/ws")
 def ws_minitel(ws):
+    if not ws_token_valid():
+        log.warning("Connexion /ws refusee (token invalide)")
+        return
     log.info("Minitel connecte (WebSocket)")
     try:
         run_session(WSTerm(ws))
@@ -251,6 +263,9 @@ def ws_minitel(ws):
 
 @sock.route("/ws-echo")
 def ws_echo(ws):
+    if not ws_token_valid():
+        log.warning("Connexion /ws-echo refusee (token invalide)")
+        return
     log.info("Echo client connecte")
     try:
         while True:
@@ -267,6 +282,9 @@ def ws_echo(ws):
 
 @sock.route("/ws-gemini")
 def ws_gemini(ws):
+    if not ws_token_valid():
+        log.warning("Connexion /ws-gemini refusee (token invalide)")
+        return
     log.info("Client Gemini connecte")
     history = []
     system_prompt = "Tu es un assistant concis, utile et amical. Réponds en français."

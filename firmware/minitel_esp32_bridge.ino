@@ -38,7 +38,10 @@ const char* WIFI_PASSWORD = "TON_MDP_WIFI";
 
 const char* WS_HOST = "minitel.mondomaine.fr";  // ton domaine Coolify
 const int   WS_PORT = 443;                       // wss
-const char* WS_PATH = "/ws";
+// Si WS_TOKEN est configure cote serveur (variable d'env WS_TOKEN), le
+// jeton doit etre passe ici en query string, sinon le serveur refuse la
+// connexion. Laisser "/ws" si WS_TOKEN n'est pas configure cote serveur.
+const char* WS_PATH = "/ws?token=TON_TOKEN";
 // ----------------------------------
 
 // UART2 vers le Minitel : 1200 bauds, 7 bits de donnees, parite paire, 1 stop.

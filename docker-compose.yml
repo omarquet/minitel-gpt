@@ -16,6 +16,9 @@ services:
       - FLASK_SECRET=${FLASK_SECRET:-change-me}
       # URL publique affichee sur le Minitel via la touche GUIDE
       - ADMIN_PUBLIC_URL=${ADMIN_PUBLIC_URL}
+      # Jeton requis en ?token=... pour se connecter aux endpoints WebSocket
+      # (/ws, /ws-echo, /ws-gemini). Vide = pas de verification.
+      - WS_TOKEN=${WS_TOKEN}
     volumes:
       # Persiste personnalites (prompts.json) + fichiers de connaissance
       - minitel-config:/app/config
