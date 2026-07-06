@@ -507,7 +507,7 @@ def show_response(t, text: str, start_at_last=False):
         if last and not start_at_last:
             return 'done'
         t.w(bytes([CR, LF]))
-        t.w(FG_CYAN)
+        t.w(SZ_NORMAL + FG_CYAN)
         t.center("-- SUITE pour continuer --" if last else "-- SUITE pour la suite --")
         if pidx > 0:
             t.center("-- RETOUR pour la page precedente --")
