@@ -362,11 +362,13 @@ TITLE_LINES = build_title()
 _COLUMN_WIDTH_BY_SIZE_BYTE = {0x4C: 1, 0x4D: 1, 0x4E: 2, 0x4F: 2}
 
 
-def visible_len(s):
+def visible_len(s, start_width=1):
     """Longueur affichee en colonnes : les sequences ESC+octet (couleur/
     taille) ont une largeur nulle, et un caractere en double largeur
-    compte pour 2 colonnes tant que le mode n'est pas remis a normal."""
-    n, i, col_width = 0, 0, 1
+    compte pour 2 colonnes tant que le mode n'est pas remis a normal.
+    `start_width` permet de tenir compte d'un mode double deja actif
+    avant `s` (ex. {grand} ouvert sur une ligne precedente)."""
+    n, i, col_width = 0, 0, start_width
     while i < len(s):
         if s[i] == chr(ESC) and i + 1 < len(s):
             b = ord(s[i + 1])
@@ -379,39 +381,65 @@ def visible_len(s):
     return n
 
 
-def visible_truncate(s, width):
+def _col_width_after(s, start_width=1):
+    """Etat de largeur de colonne (1 ou 2) juste apres `s`, en partant de
+    `start_width` (pour propager le mode double d'une ligne a l'autre)."""
+    i, col_width = 0, start_width
+    while i < len(s):
+        if s[i] == chr(ESC) and i + 1 < len(s):
+            b = ord(s[i + 1])
+            if b in _COLUMN_WIDTH_BY_SIZE_BYTE:
+                col_width = _COLUMN_WIDTH_BY_SIZE_BYTE[b]
+            i += 2
+            continue
+        i += 1
+    return col_width
+
+
+def visible_truncate(s, width, start_width=1):
     """Tronque a `width` COLONNES affichees (double largeur = 2 colonnes),
     en preservant les sequences ESC+octet rencontrees en cours de route
-    (jamais coupees en deux)."""
-    out, n, i, col_width = [], 0, 0, 1
-    while i < len(s) and n < width:
+    (jamais coupees en deux). `start_width` : voir `visible_len`."""
+    out, n, i, col_width = [], 0, 0, start_width
+    while i < len(s):
         if s[i] == chr(ESC) and i + 1 < len(s):
             b = ord(s[i + 1])
             if b in _COLUMN_WIDTH_BY_SIZE_BYTE:
                 col_width = _COLUMN_WIDTH_BY_SIZE_BYTE[b]
             out.append(s[i:i + 2]); i += 2
             continue
+        if n + col_width > width:
+            break
         out.append(s[i]); n += col_width; i += 1
     return "".join(out)
 
 
 def wrap(text, width=COLS):
     out = []
+    # Etat (1 ou 2 colonnes/caractere) qui persiste d'une ligne a l'autre :
+    # un {grand} ouvert sur une ligne et referme plus loin doit continuer a
+    # compter double sur les lignes suivantes, sinon on sous-estime leur
+    # largeur reelle et le texte deborde des 40 colonnes a l'affichage.
+    col_width = 1
     for para in text.split("\n"):
         if not para.strip():
             out.append("")
             continue
         cur = ""
+        line_width = col_width   # etat au debut de la ligne en construction
         for word in para.split():
             # Mesure la ligne candidate d'un seul tenant (pas cur et word
             # separement) pour que l'etat couleur/taille se propage bien
             # d'un mot au suivant (ex. {grand}mot1 mot2{/} sur 2 mots).
             candidate = (cur + " " + word).strip() if cur else word
-            if visible_len(candidate) <= width:
+            if visible_len(candidate, line_width) <= width:
                 cur = candidate
+                col_width = _col_width_after(candidate, line_width)
             else:
                 out.append(cur)
-                cur = visible_truncate(word, width)
+                line_width = col_width
+                cur = visible_truncate(word, width, line_width)
+                col_width = _col_width_after(cur, line_width)
         if cur:
             out.append(cur)
     return out
