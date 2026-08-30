@@ -106,6 +106,12 @@ def with_fixed_date(system_prompt):
 # moment. Pas de tool-calling generique, juste ce cas precis, en dur.
 AGILE_EN_SEINE_URL = "https://www.agileenseine.com/programme-2026/"
 AGILE_EN_SEINE_KEYWORDS = ("agile en seine", "agileenseine", "aes")
+# Plafond du contenu injecte, aligne sur celui des fichiers de connaissance.
+# A 4000 caracteres, plus de la moitie du programme etait coupee (42 creneaux
+# horaires conserves sur 100) et la troncature tombait en plein titre de
+# session : le modele repondait alors a cote sur les conferences de fin de
+# journee, sans rien signaler.
+AGILE_EN_SEINE_MAX_CHARS = 12000
 
 
 def is_agile_en_seine_question(text):
@@ -121,7 +127,7 @@ def fetch_agile_en_seine_context():
         html = re.sub(r"<style[^>]*>.*?</style>", " ", html, flags=re.S | re.I)
         text = re.sub(r"<[^>]+>", " ", html)
         text = re.sub(r"\s+", " ", text).strip()
-        return text[:4000]
+        return text[:AGILE_EN_SEINE_MAX_CHARS]
     except Exception as e:
         log.warning("fetch agile en seine: %s", e)
         return ""
