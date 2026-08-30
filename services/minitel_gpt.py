@@ -45,11 +45,35 @@ _MARKDOWN_PATTERNS = [
     (re.compile(r"\[([^\]]+)\]\([^)]+\)"), r"\1"),      # [texte](url)
 ]
 
+# Dessins ASCII : {art}...{/art}. Sans protection, un dessin est detruit deux
+# fois - strip_markdown mange les "_" et les "*" par paires, et wrap() fait un
+# para.split() qui ecrase les espaces d'alignement et refusionne les lignes.
+# Chaque ligne du bloc est donc prefixee par ART_MARK, un caractere de controle
+# qui traverse to_ascii et apply_minitel_markup sans etre touche, et que wrap()
+# reconnait pour recopier la ligne telle quelle.
+ART_MARK = "\x01"
+_ART_RE = re.compile(r"\{art\}[ \t]*\n?(.*?)\n?[ \t]*\{/art\}", re.S)
+
+
+def _mark_art_lines(block: str) -> str:
+    return "\n".join(ART_MARK + ln for ln in block.split("\n"))
+
+
 def strip_markdown(s: str) -> str:
     if not s:
         return s
+    # Les blocs {art} sont mis de cote avant les substitutions Markdown.
+    blocks = []
+
+    def stash(m):
+        blocks.append(m.group(1))
+        return f"{ART_MARK}#{len(blocks) - 1}#"
+
+    s = _ART_RE.sub(stash, s)
     for pattern, repl in _MARKDOWN_PATTERNS:
         s = pattern.sub(repl, s)
+    for i, block in enumerate(blocks):
+        s = s.replace(f"{ART_MARK}#{i}#", _mark_art_lines(block))
     return s
 
 load_dotenv(Path(__file__).parent.parent / ".env")
@@ -250,6 +274,15 @@ MARKUP_INSTRUCTIONS = (
     "{magenta}...{/}, {cyan}...{/}, {blanc}...{/} pour changer la couleur, "
     "{grand}...{/} pour un texte en double hauteur/largeur. "
     "Toujours refermer avec {/}. N'utilise RIEN d'autre comme mise en forme."
+    "\n\nDessins ASCII : si on te demande un dessin, un logo ou un schema, "
+    "encadre-le par {art} et {/art}, chacun seul sur sa ligne. Les lignes "
+    "situees entre les deux sont affichees telles quelles, espaces compris, "
+    "sans reformatage. Contraintes a respecter imperativement : 40 colonnes "
+    "de large au maximum et 15 lignes de haut au maximum, uniquement des "
+    "caracteres ASCII simples, et aucune autre mise en forme a l'interieur "
+    "du bloc. Compte les colonnes ligne par ligne avant de repondre : "
+    "au-dela de 40, la ligne est coupee a l'affichage. N'utilise {art} que "
+    "pour un vrai dessin, jamais pour du texte ordinaire."
 )
 
 
@@ -422,6 +455,13 @@ def wrap(text, width=COLS):
     # largeur reelle et le texte deborde des 40 colonnes a l'affichage.
     col_width = 1
     for para in text.split("\n"):
+        # Ligne de dessin ({art}) : recopiee telle quelle, espaces d'alignement
+        # compris. Seule concession, la troncature a la largeur de l'ecran.
+        # Un dessin est toujours en taille normale : on remet col_width a 1.
+        if para.startswith(ART_MARK):
+            col_width = 1
+            out.append(visible_truncate(para[len(ART_MARK):], width))
+            continue
         if not para.strip():
             out.append("")
             continue
