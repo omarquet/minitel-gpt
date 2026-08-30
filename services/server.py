@@ -262,10 +262,10 @@ def run_session(t):
     """Boucle de conversation, pilotee par un WSTerm. call_llm() (minitel_gpt)
     aiguille lui-meme vers Mistral/Claude/Gemini selon LLM_PROVIDER."""
     while True:                             # boucle sommaire
-        system_prompt, title_msg, question_msg, loading_msg = load_preset()
+        system_prompt, title_msg, question_msg, loading_msg, logo = load_preset()
         system_prompt = with_fixed_date(system_prompt)
         history = []
-        show_home(t, title_msg, question_msg)
+        show_home(t, title_msg, question_msg, logo)
 
         while True:                         # boucle conversation
             question, action = read_question(t)

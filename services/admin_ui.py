@@ -32,7 +32,21 @@ DEFAULTS = {
     "title_msg": "*** MINITEL GPT ***",
     "question_msg": "Posez votre question :",
     "loading_msg": "Consultation en cours...",
+    "logo_text": "",
+    "logo_font": "small",
+    "logo_art": "",
 }
+
+# Logo d'accueil : au maximum 39 colonnes (une ligne pleine ferait sauter une
+# rangée à l'affichage) et 12 lignes, pour que le logo, les deux messages et la
+# ligne de saisie tiennent dans les 24 rangées de l'écran.
+LOGO_MAX_COLS = 39
+LOGO_MAX_LINES = 12
+# Polices vérifiées : chacune tient dans les 39 colonnes pour un mot courant.
+# Un mot long peut malgré tout déborder : la largeur est contrôlée à la
+# sauvegarde et le résultat annoncé à l'utilisateur.
+LOGO_FONTS = ["small", "standard", "slant", "big", "banner", "chunky",
+              "shadow", "cybermedium", "mini", "digital"]
 
 # Caractères affichés sur le Minitel → nettoyage ASCII (le Minitel ne gère pas
 # les accents ni les caractères spéciaux). Appliqué à la sauvegarde des presets.
@@ -472,6 +486,26 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
       <input type=text name=question_msg id=fquestion maxlength=40>
       <label>Message d'attente (max 40)</label>
       <input type=text name=loading_msg id=floading maxlength=40>
+
+      <div style="border-left:3px solid var(--accent);padding-left:12px;margin:16px 0">
+        <h3 style=margin-top:4px>Logo d'accueil</h3>
+        <p class=sub style=margin:0 0 10px>Laissez tout vide pour garder le logo
+          MINITEL GPT. Le dessin libre, s'il est rempli, l'emporte sur le mot.
+          Maximum {{logo_max_cols}} colonnes et {{logo_max_lines}} lignes : au-delà, c'est coupé.</p>
+        <label>Mot à dessiner</label>
+        <input type=text name=logo_text id=flogotext maxlength=20 placeholder="ex. aqoba (vide = logo par défaut)">
+        <label>Police</label>
+        <select name=logo_font id=flogofont>
+          {% for f in logo_fonts %}
+          <option value="{{f}}">{{f}}</option>
+          {% endfor %}
+        </select>
+        <label>Ou dessin libre (prioritaire)</label>
+        <textarea name=logo_art id=flogoart rows=8 spellcheck=false
+          style="font-family:ui-monospace,Menlo,monospace;white-space:pre;overflow-x:auto"
+          placeholder="Collez ici un dessin ASCII, une ligne par ligne."></textarea>
+      </div>
+
       <label>Prompt système (consignes de l'IA)</label>
       <textarea name=prompt id=fsystem rows=12></textarea>
       <hr>
@@ -606,6 +640,8 @@ function loadPreset(){
   const k=document.getElementById('presetSel').value, p=PRESETS[k]; if(!p)return;
   fkey.value=k; flabel.value=p.label||''; ftitle.value=p.title_msg||'';
   fquestion.value=p.question_msg||''; floading.value=p.loading_msg||''; fsystem.value=p.prompt||'';
+  flogotext.value=p.logo_text||''; flogoart.value=p.logo_art||'';
+  flogofont.value=p.logo_font||'small';
   document.getElementById('activeInfo').textContent=
     (k===ACTIVE)?'● Personnalité actuellement active sur le Minitel.'
                 :'Personnalité inactive. Cliquez « Activer » pour l\\'utiliser.';
@@ -689,6 +725,8 @@ def index():
     return render_template_string(
         ADMIN_HTML, presets=presets, presets_json=json.dumps(presets),
         knowledge_json=json.dumps(all_knowledge()),
+        logo_fonts=LOGO_FONTS, logo_max_cols=LOGO_MAX_COLS,
+        logo_max_lines=LOGO_MAX_LINES,
         active_key=data["active"],
         log_chatgpt=log_tail("chatgpt"),
         provider=llm_provider(),
@@ -700,6 +738,30 @@ def index():
         gemini_models=with_current(GEMINI_MODELS, gemini_model()),
         flash=flash, flash_ok=flash_ok)
 
+def save_logo_fields(p):
+    """Enregistre les trois champs de logo et retourne un avertissement si le
+    dessin a du être rogné. Un dessin trop large ne se voit pas dans le
+    formulaire mais saute aux yeux sur le Minitel : autant le dire tout de
+    suite plutôt que de laisser découvrir la coupure à l'écran."""
+    p["logo_text"] = to_minitel_ascii(request.form.get("logo_text", ""))[:20].strip()
+    font = request.form.get("logo_font", DEFAULTS["logo_font"]).strip()
+    p["logo_font"] = font if font in LOGO_FONTS else DEFAULTS["logo_font"]
+
+    art = to_minitel_ascii(request.form.get("logo_art", "")).replace("\r\n", "\n")
+    lignes = [ln.rstrip() for ln in art.split("\n")] if art.strip() else []
+    trop_larges = sum(1 for ln in lignes if len(ln) > LOGO_MAX_COLS)
+    trop_hautes = max(0, len(lignes) - LOGO_MAX_LINES)
+    lignes = [ln[:LOGO_MAX_COLS] for ln in lignes][:LOGO_MAX_LINES]
+    p["logo_art"] = "\n".join(lignes).strip("\n")
+
+    avert = []
+    if trop_larges:
+        avert.append(f"{trop_larges} ligne(s) coupée(s) à {LOGO_MAX_COLS} colonnes")
+    if trop_hautes:
+        avert.append(f"{trop_hautes} ligne(s) au-delà de {LOGO_MAX_LINES} supprimée(s)")
+    return " ; ".join(avert)
+
+
 @app.route("/save-prompt", methods=["POST"])
 @require_login
 def save_prompt():
@@ -710,12 +772,14 @@ def save_prompt():
     p["title_msg"] = to_minitel_ascii(request.form.get("title_msg", DEFAULTS["title_msg"]))[:40]
     p["question_msg"] = to_minitel_ascii(request.form.get("question_msg", DEFAULTS["question_msg"]))[:40]
     p["loading_msg"] = to_minitel_ascii(request.form.get("loading_msg", DEFAULTS["loading_msg"]))[:40]
+    avert = save_logo_fields(p)
     sp = request.form.get("prompt", "").strip()
     if sp:
         p["prompt"] = sp
     save_prompts(data)
-    session["flash"] = f"Personnalité '{p['label']}' enregistrée."
-    session["flash_ok"] = True
+    session["flash"] = (f"Personnalité '{p['label']}' enregistrée."
+                        + (f" Logo ajusté : {avert}." if avert else ""))
+    session["flash_ok"] = not avert
     return redirect(url_for("index"))
 
 @app.route("/apply-preset", methods=["POST"])
@@ -730,6 +794,7 @@ def apply_preset():
             p["title_msg"] = to_minitel_ascii(request.form.get("title_msg", DEFAULTS["title_msg"]))[:40]
             p["question_msg"] = to_minitel_ascii(request.form.get("question_msg", DEFAULTS["question_msg"]))[:40]
             p["loading_msg"] = to_minitel_ascii(request.form.get("loading_msg", DEFAULTS["loading_msg"]))[:40]
+            save_logo_fields(p)
             if request.form.get("prompt", "").strip():
                 p["prompt"] = request.form.get("prompt").strip()
         data["active"] = k

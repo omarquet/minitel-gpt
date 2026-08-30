@@ -401,29 +401,59 @@ def load_preset():
             p.get("title_msg", "*** MINITEL GPT ***"),
             p.get("question_msg", "Posez votre question :"),
             p.get("loading_msg", "Consultation en cours..."),
+            render_logo(p),
         )
     except Exception as e:
         log.warning(f"prompts.json: {e}")
         return (FALLBACK_PROMPT, "*** MINITEL GPT ***",
-                "Posez votre question :", "Consultation en cours...")
+                "Posez votre question :", "Consultation en cours...",
+                TITLE_LINES)
 
 
 # ── ASCII title (pyfiglet) ───────────────────────────────────────────────
-def build_title():
+# Un logo ne doit jamais remplir les 40 colonnes : une ligne pleine fait deja
+# passer le curseur du Minitel a la rangee suivante, et le CR LF ajoute par
+# line() y laisserait une ligne vide. On s'arrete donc a 39, et on plafonne la
+# hauteur pour que le logo, les deux messages et la ligne de saisie tiennent
+# dans les 24 rangees de l'ecran.
+LOGO_MAX_COLS = COLS - 1
+LOGO_MAX_LINES = 12
+
+
+def figlet_lines(word, font):
+    """Rend un mot en lettres ASCII. Retourne [] si la police est inconnue ou
+    si pyfiglet est absent, pour que l'appelant puisse se rabattre."""
     try:
         from pyfiglet import Figlet
-        lines = []
-        for word, font in [("MINITEL", "small"), ("GPT", "standard")]:
-            fig = Figlet(font=font, width=COLS)
-            for ln in fig.renderText(word).rstrip("\n").split("\n"):
-                if ln.strip():
-                    lines.append(ln[:COLS])
-        return lines
+        rendu = Figlet(font=font, width=COLS).renderText(word).rstrip("\n")
+        lines = [ln[:LOGO_MAX_COLS] for ln in rendu.split("\n") if ln.strip()]
+        return lines[:LOGO_MAX_LINES]
     except Exception as e:
-        log.warning(f"pyfiglet: {e}")
-        return ["", "    M I N I T E L   G P T", ""]
+        log.warning("pyfiglet (%s / %s): %s", word, font, e)
+        return []
+
+
+def build_title():
+    lines = figlet_lines("MINITEL", "small") + figlet_lines("GPT", "standard")
+    return lines or ["", "    M I N I T E L   G P T", ""]
+
 
 TITLE_LINES = build_title()
+
+
+def render_logo(preset):
+    """Lignes du logo d'un preset, par ordre de priorite : le dessin libre
+    (logo_art) s'il est renseigne, sinon un mot rendu par pyfiglet
+    (logo_text / logo_font), sinon le logo MINITEL GPT par defaut."""
+    art = (preset.get("logo_art") or "").strip("\n")
+    if art.strip():
+        return [ln[:LOGO_MAX_COLS] for ln in art.split("\n")][:LOGO_MAX_LINES]
+    word = (preset.get("logo_text") or "").strip()
+    if word:
+        lines = figlet_lines(word, (preset.get("logo_font") or "small").strip())
+        if lines:
+            return lines
+    return TITLE_LINES
 
 
 # ── Serial helpers ───────────────────────────────────────────────────────
@@ -534,11 +564,11 @@ def wrap(text, width=COLS):
 
 
 # ── Écrans ───────────────────────────────────────────────────────────────
-def show_home(t, title_msg, question_msg):
+def show_home(t, title_msg, question_msg, title_lines=None):
     t.clear()
     t.w(bytes([CR, LF]))
     t.w(FG_CYAN)
-    for ln in TITLE_LINES:
+    for ln in (TITLE_LINES if title_lines is None else title_lines):
         t.center(ln)
     t.w(bytes([CR, LF, CR, LF]))      # 2 lignes après le logo
     t.w(FG_YELLOW)
