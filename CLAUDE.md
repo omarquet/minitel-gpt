@@ -43,8 +43,11 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
 - `Dockerfile` + `entrypoint.sh` + `requirements.txt` — image Python 3.11,
   lancée par gunicorn (`-k gthread`). L'entrypoint amorce le volume config.
 - `docker-compose.yml` — pour le serveur, volume `minitel-config` persistant.
-- `firmware/minitel_esp32_bridge.ino` — firmware ESP32 : UART2 en `SERIAL_7E1`
-  (1200 bauds) <-> WebSocket client (lib WebSockets de Links2004). Relais brut.
+- `firmware/firmware.ino` — firmware ESP32-C3 : UART1 (GPIO4 RX / GPIO5 TX) en
+  `SERIAL_7E1` (1200 bauds) <-> WebSocket client (lib WebSockets de Links2004).
+  Relais brut. Le C3 n'a pas d'UART2 et ses GPIO11-17 sont pris par la flash :
+  les GPIO16/17 du projet d'origine sont inutilisables. Identifiants WiFi et
+  token WS dans `firmware/secrets.h` (ignoré par git, modèle `secrets.h.example`).
 - `minitel-test.html` — émulateur Minitel navigateur qui parle le MÊME
   protocole WebSocket binaire que l'ESP32 (rendu Videotex 40 col, touches SEP),
   URL et token WS configurables dans l'interface. Sert à tester SANS matériel.
@@ -60,6 +63,22 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
 - **Piège matériel** : le port DIN Minitel est en 5 V, les GPIO ESP32 en 3,3 V
   NON tolérants 5 V -> adaptateur de niveau logique bidirectionnel OBLIGATOIRE
   (BSS138 / TXS0108E), au moins sur Minitel TX -> ESP32 RX.
+- **Piège matériel n°2 — 12 V sur la broche 5 du DIN** (mesuré sur le Minitel 2
+  Alcatel du montage). Ne jamais la relier à l'ESP32-C3 : sur ces petites
+  cartes, `5V` est câblée au VBUS USB et le régulateur 3,3 V plafonne vers 6 V.
+  Pour un montage autonome : buck DC-DC 12 V -> 5 V (tension vérifiée au
+  voltmètre) + condensateur 470-1000 µF, et ne jamais cumuler l'USB et le buck
+  sur le même rail. Détail complet dans l'en-tête de `firmware/firmware.ino`.
+- **Ordre de branchement** : USB d'abord, DIN ensuite (et l'inverse pour
+  débrancher). Le VB du TXS0108E vient de la broche `5V` de l'ESP32-C3, qui est
+  le VBUS USB : DIN branché en premier, le 5 V du Minitel remonte par les diodes
+  de protection et alimente partiellement la carte (LED d'alim faiblement
+  allumée, rails indéterminés).
+- **Montage de référence** : ESP32-C3 (UART1, GPIO4 RX / GPIO5 TX), TXS0108E
+  VA=3,3 V / VB=5 V avec OE tiré haut par la carte, alimenté en USB pendant la
+  mise au point. LED de statut sur GPIO8, **logique inversée** (`LOW` = allumée) :
+  flash bref toutes les 2 s = tout va bien, clignotement lent = WebSocket coupée,
+  rapide = WiFi perdu, LED figée = `loop()` bloqué.
 - L'admin en conteneur : les boutons Update/Rollback/Restart hérités du Pi
   (systemd + git) ont été retirés de l'interface (inutilisables en conteneur,
   cf. `git log` sur `admin_ui.py`) ; les mises à jour se font par redéploiement
@@ -97,7 +116,13 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
 - [x] Support Raspberry Pi entièrement retiré (install.sh, unités systemd,
       sudoers, port série, WiFi captif) ; README.md réécrit pour VPS/ESP32.
 - [x] Gemini consolidé dans `minitel_gpt.py` (plus dupliqué dans `server.py`).
-- [ ] Montage matériel ESP32 + level shifter, flash du firmware.
+- [x] Montage matériel ESP32-C3 + TXS0108E câblé et vérifié.
+- [x] Firmware prêt pour la prod : identifiants sortis du fichier suivi
+      (`firmware/secrets.h`, ignoré ; modèle `secrets.h.example`), `WS_PATH`
+      avec token URL-encodé, reconnexion WiFi/WS durcie, LED de statut.
+- [ ] Flash du firmware sur la carte et test bout en bout depuis le Minitel.
+- [ ] `WS_TOKEN` de production trop court (5 caractères) : à remplacer par une
+      valeur aléatoire longue côté variables d'environnement du serveur.
 
 ## Prochaines pistes possibles
 

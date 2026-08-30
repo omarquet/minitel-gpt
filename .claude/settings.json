@@ -5,7 +5,26 @@
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
       "Bash(git push *)",
-      "Bash(git rm *)"
+      "Bash(git rm *)",
+      "Bash(curl -sS -o /dev/null -w \"HTTP %{http_code}\\\\n\" --max-time 10 https://minitel.playground.aqoba.fr/)",
+      "Bash(curl -sS --max-time 10 https://minitel.playground.aqoba.fr/healthz)",
+      "Bash(curl -sS -o /dev/null -w 'HTTP %{http_code}\\\\n' --max-time 10 -i -N -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' https://minitel.playground.aqoba.fr/ws)",
+      "Bash(python3 -c \"import secrets; print\\(secrets.token_hex\\(32\\)\\)\")",
+      "Bash(curl -sS -o /dev/null -w \"sans port -> HTTP %{http_code}\\\\n\" --max-time 10 https://minitel.playground.aqoba.fr/healthz)",
+      "Bash(curl -sS -o /dev/null -w \"avec :8080 -> HTTP %{http_code}\\\\n\" --max-time 10 https://minitel.playground.aqoba.fr:8080/healthz)",
+      "Bash(curl -sS -o /dev/null -w \"HTTP %{http_code}\\\\n\" --max-time 10 https://minitel.playground.aqoba.fr/minitel-test.html)",
+      "Bash(python3 -c \"import flask_sock, inspect, os; print\\(flask_sock.__file__\\)\")",
+      "Bash(pip3 show *)",
+      "Bash(python3 -m py_compile services/server.py)",
+      "Bash(python3 -)",
+      "Bash(python3 -c \"import json; json.load\\(open\\('config/prompts.default.json', encoding='utf-8'\\)\\); print\\('JSON valide'\\)\")",
+      "Bash(gh api *)",
+      "Bash(python3 -m py_compile /Users/olivier/Documents/repositories/omarquet-github/minitel-gpt/services/server.py)",
+      "Bash(python3 -c \"import json; d=json.load\\(open\\('config/prompts.default.json', encoding='utf-8'\\)\\); print\\(d['presets']['annees80bis']['fixed_year']\\)\")",
+      "WebFetch(domain:www.agileenseine.com)",
+      "Bash(curl -sS --max-time 15 \"https://www.agileenseine.com/programme-2026/\")",
+      "Bash(curl -sS --max-time 15 \"https://www.agileenseine.com/programme-2026/\" -o /tmp/aes.html)",
+      "Bash(python3 -c ' *)"
     ]
   }
 }

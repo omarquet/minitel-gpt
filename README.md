@@ -106,7 +106,7 @@ Videotex, gérés par l'UART de l'ESP32 (`SERIAL_7E1`).
 
 ### Firmware
 
-`firmware/minitel_esp32_bridge.ino` - relais transparent octet à octet entre
+`firmware/firmware.ino` - relais transparent octet à octet entre
 l'UART du Minitel et une connexion WebSocket cliente (lib **WebSockets** de
 Markus Sattler / Links2004, disponible dans le gestionnaire de bibliothèques
 Arduino). À configurer avant flash : SSID/mot de passe WiFi, domaine du
@@ -164,7 +164,8 @@ services/
 config/
   prompts.default.json  personnalités par défaut (prompts.json créé au 1er boot)
 firmware/
-  minitel_esp32_bridge.ino  pont UART <-> WebSocket
+  firmware.ino          pont UART <-> WebSocket (sketch Arduino)
+  secrets.h.example     modèle de secrets.h (WiFi + token WS, non versionné)
 minitel-test.html        émulateur Minitel dans le navigateur (test sans matériel)
 Dockerfile, docker-compose.yml, entrypoint.sh
 DEPLOY.md                procédure de déploiement
