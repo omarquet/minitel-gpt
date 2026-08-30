@@ -54,6 +54,14 @@ _MARKDOWN_PATTERNS = [
 ART_MARK = "\x01"
 _ART_RE = re.compile(r"\{art\}[ \t]*\n?(.*?)\n?[ \t]*\{/art\}", re.S)
 
+# Typographie francaise : une espace precede ? ! : et ;. wrap() decoupe sur les
+# espaces, il peut donc laisser la ponctuation seule en debut de ligne
+# ("...en 1989" / "? Eh bien..."). Le temps du decoupage, cette espace est
+# remplacee par une sentinelle que split() ne considere pas comme un separateur
+# (ce n'est pas un caractere blanc) ; elle redevient une espace a la sortie.
+NBSP_MARK = "\x02"
+_FR_PUNCT_RE = re.compile(r"[ \t]+([?!:;])")
+
 
 def _mark_art_lines(block: str) -> str:
     return "\n".join(ART_MARK + ln for ln in block.split("\n"))
@@ -448,6 +456,13 @@ def visible_truncate(s, width, start_width=1):
 
 
 def wrap(text, width=COLS):
+    # Une ligne qui remplit exactement les 40 colonnes fait DEJA passer le
+    # curseur du Minitel a la rangee suivante (debordement automatique en fin
+    # de rangee). Le CR LF emis ensuite par line() descend alors une seconde
+    # fois et laisse une ligne vide a l'ecran, de facon apparemment aleatoire
+    # puisque cela ne touche que les lignes pleines. On s'arrete donc une
+    # colonne avant. Vaut aussi pour les blocs {art}, tronques plus bas.
+    width = min(width, COLS - 1)
     out = []
     # Etat (1 ou 2 colonnes/caractere) qui persiste d'une ligne a l'autre :
     # un {grand} ouvert sur une ligne et referme plus loin doit continuer a
@@ -465,6 +480,7 @@ def wrap(text, width=COLS):
         if not para.strip():
             out.append("")
             continue
+        para = _FR_PUNCT_RE.sub(NBSP_MARK + r"\1", para)
         cur = ""
         line_width = col_width   # etat au debut de la ligne en construction
         for word in para.split():
@@ -482,7 +498,8 @@ def wrap(text, width=COLS):
                 col_width = _col_width_after(cur, line_width)
         if cur:
             out.append(cur)
-    return out
+    # La sentinelle redevient une espace ordinaire une fois le decoupage fait.
+    return [ln.replace(NBSP_MARK, " ") for ln in out]
 
 
 # ── Écrans ───────────────────────────────────────────────────────────────
