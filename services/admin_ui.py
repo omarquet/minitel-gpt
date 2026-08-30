@@ -147,9 +147,17 @@ def anthropic_key():
 def claude_model():
     return read_env().get("CLAUDE_MODEL", "claude-haiku-4-5")
 
+def gemini_key():
+    env = read_env()
+    return (env.get("GEMINI_KEY") or env.get("GEMINI_API_KEY")
+            or os.getenv("GEMINI_KEY") or os.getenv("GEMINI_API_KEY") or "")
+
+def gemini_model():
+    return read_env().get("GEMINI_MODEL", "gemini-3.1-flash-lite")
+
 def llm_provider():
     p = read_env().get("LLM_PROVIDER", os.getenv("LLM_PROVIDER", "mistral")).strip().lower()
-    return p if p in ("mistral", "claude") else "mistral"
+    return p if p in ("mistral", "claude", "gemini") else "mistral"
 
 def mask_key(k):
     return (k[:6] + "..." + k[-4:]) if len(k) > 12 else ("(définie)" if k else "(absente)")
@@ -167,8 +175,18 @@ CLAUDE_MODELS = [
     ("claude-sonnet-4-6", "Claude Sonnet 4.6 - équilibre vitesse/intelligence (3 $ / 15 $ par M)"),
     ("claude-opus-4-8",   "Claude Opus 4.8 - le plus pertinent, plus cher (5 $ / 25 $ par M)"),
 ]
+# Identifiants verifies via l'API ListModels de Google. Pas de tarif indique :
+# contrairement a Mistral et Claude, ceux de ces modeles ne sont pas connus ici
+# et mieux vaut ne rien afficher qu'un chiffre invente.
+GEMINI_MODELS = [
+    ("gemini-3.1-flash-lite", "Gemini 3.1 Flash Lite - le plus leger et rapide, recommandé"),
+    ("gemini-3.5-flash",      "Gemini 3.5 Flash - bon équilibre"),
+    ("gemini-3.7-flash",      "Gemini 3.7 Flash - le plus récent des Flash"),
+    ("gemini-2.5-pro",        "Gemini 2.5 Pro - le plus pertinent, plus lent"),
+]
 MISTRAL_MODEL_IDS = {m[0] for m in MISTRAL_MODELS}
 CLAUDE_MODEL_IDS = {m[0] for m in CLAUDE_MODELS}
+GEMINI_MODEL_IDS = {m[0] for m in GEMINI_MODELS}
 
 # ── Auth ─────────────────────────────────────────────────────────────────
 def require_login(f):
@@ -207,6 +225,8 @@ def generate_prompt(description):
         "Reponds UNIQUEMENT avec le texte du prompt systeme, sans preambule.\n\n"
         f"DESCRIPTION DU PROJET :\n{description}"
     )
+    if llm_provider() == "gemini":
+        return gemini_answer("", meta, 1500)
     if llm_provider() == "claude":
         key = anthropic_key()
         if not key:
@@ -237,11 +257,41 @@ def generate_prompt(description):
     r.raise_for_status()
     return r.json()["choices"][0]["message"]["content"].strip()
 
+def gemini_answer(system_prompt, user_message, max_tokens):
+    """Appelle Gemini (generateContent). L'equivalent existe dans minitel_gpt,
+    mais il lit la cle/le modele une fois au demarrage du process : ici on relit
+    le .env a chaque appel, pour que l'admin reflete tout de suite un changement.
+    Gemini n'a pas de champ "system" : le prompt systeme est passe en premier
+    tour de parole, comme dans minitel_gpt.call_gemini."""
+    import requests
+    key = gemini_key()
+    if not key:
+        raise RuntimeError("Clé Gemini absente")
+    contents = []
+    if system_prompt:
+        contents.append({"role": "user", "parts": [{"text": f"[System]\n{system_prompt}"}]})
+    contents.append({"role": "user", "parts": [{"text": user_message}]})
+    r = requests.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model()}:generateContent?key={key}",
+        json={"contents": contents, "generationConfig": {"maxOutputTokens": max_tokens}},
+        timeout=45,
+    )
+    r.raise_for_status()
+    parts = []
+    for candidate in r.json().get("candidates", []):
+        for part in candidate.get("content", {}).get("parts", []):
+            if isinstance(part, dict) and part.get("text"):
+                parts.append(part["text"])
+    return "".join(parts).strip()
+
+
 def llm_answer(system_prompt, user_message):
     """Interroge le LLM configuré comme le ferait le terminal (system + question).
     Retourne le texte de la réponse."""
     import requests
     history = [{"role": "user", "content": user_message}]
+    if llm_provider() == "gemini":
+        return gemini_answer(system_prompt, user_message, 700)
     if llm_provider() == "claude":
         key = anthropic_key()
         if not key:
@@ -452,6 +502,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
       <select name=llm_provider>
         <option value=mistral {{'selected' if provider=='mistral'}}>Mistral</option>
         <option value=claude {{'selected' if provider=='claude'}}>Claude (Anthropic)</option>
+        <option value=gemini {{'selected' if provider=='gemini'}}>Gemini (Google)</option>
       </select>
 
       <div style="border-left:3px solid var(--accent);padding-left:12px;margin-top:16px">
@@ -478,6 +529,20 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
         <select name=claude_model>
           {% for cid,desc in claude_models %}
           <option value="{{cid}}" {{'selected' if cid==claude_model}}>{{desc}}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div style="border-left:3px solid var(--accent);padding-left:12px;margin-top:16px">
+        <h3 style=margin-top:4px>Gemini (Google)</h3>
+        <label>Clé API Gemini <span class=sub>(actuelle : {{gemini_key_masked}})</span></label>
+        <input type=password name=gemini_key placeholder="clé Google AI Studio... (vide = conserver l'actuelle)">
+        <p class=sub style=margin:6px 0 0>Pas encore de clé ?
+          <a href="https://aistudio.google.com/apikey" target=_blank rel=noopener>Créer une clé API Gemini &#8599;</a></p>
+        <label>Modèle Gemini</label>
+        <select name=gemini_model>
+          {% for gid,desc in gemini_models %}
+          <option value="{{gid}}" {{'selected' if gid==gemini_model}}>{{desc}}</option>
           {% endfor %}
         </select>
       </div>
@@ -608,7 +673,9 @@ def index():
         provider=llm_provider(),
         mistral_key_masked=mask_key(mistral_key()), mistral_model=mistral_model(),
         claude_key_masked=mask_key(anthropic_key()), claude_model=claude_model(),
+        gemini_key_masked=mask_key(gemini_key()), gemini_model=gemini_model(),
         mistral_models=MISTRAL_MODELS, claude_models=CLAUDE_MODELS,
+        gemini_models=GEMINI_MODELS,
         flash=flash, flash_ok=flash_ok)
 
 @app.route("/save-prompt", methods=["POST"])
@@ -732,7 +799,7 @@ def test_preset_route():
 @require_login
 def save_llm():
     provider = request.form.get("llm_provider", "mistral").strip().lower()
-    if provider not in ("mistral", "claude"):
+    if provider not in ("mistral", "claude", "gemini"):
         provider = "mistral"
     write_env_key("LLM_PROVIDER", provider)
 
@@ -743,6 +810,9 @@ def save_llm():
     ak = request.form.get("anthropic_key", "").strip()
     if ak:
         write_env_key("ANTHROPIC_KEY", ak)
+    gk = request.form.get("gemini_key", "").strip()
+    if gk:
+        write_env_key("GEMINI_KEY", gk)
 
     # Modèles : on ne retient qu'un identifiant connu.
     mm = request.form.get("mistral_model", "").strip()
@@ -751,10 +821,13 @@ def save_llm():
     cm = request.form.get("claude_model", "").strip()
     if cm in CLAUDE_MODEL_IDS:
         write_env_key("CLAUDE_MODEL", cm)
+    gm = request.form.get("gemini_model", "").strip()
+    if gm in GEMINI_MODEL_IDS:
+        write_env_key("GEMINI_MODEL", gm)
 
-    label = "Claude" if provider == "claude" else "Mistral"
-    missing = (provider == "claude" and not anthropic_key()) or \
-              (provider == "mistral" and not mistral_key())
+    label = {"claude": "Claude", "gemini": "Gemini"}.get(provider, "Mistral")
+    key_present = {"claude": anthropic_key, "gemini": gemini_key}.get(provider, mistral_key)
+    missing = not key_present()
     if missing:
         session["flash"] = f"Configuration enregistrée (fournisseur : {label}), mais aucune clé API n'est définie pour ce fournisseur."
         session["flash_ok"] = False
