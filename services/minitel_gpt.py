@@ -159,7 +159,12 @@ def call_mistral(system_prompt, history):
         timeout=30,
     )
     r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"].strip()
+    choice = r.json()["choices"][0]
+    # Une reponse coupee au plafond arrive sinon en silence : sur le Minitel
+    # elle se lit comme une phrase qui s'arrete en plein mot, sans indice.
+    if choice.get("finish_reason") == "length":
+        log.warning("Reponse Mistral tronquee (plafond de 700 tokens atteint)")
+    return choice["message"]["content"].strip()
 
 
 def call_claude(system_prompt, history):
@@ -175,9 +180,17 @@ def call_claude(system_prompt, history):
         timeout=30,
     )
     r.raise_for_status()
-    blocks = r.json().get("content", [])
+    data = r.json()
+    if data.get("stop_reason") == "max_tokens":
+        log.warning("Reponse Claude tronquee (plafond de tokens atteint)")
+    blocks = data.get("content", [])
     return "".join(b.get("text", "") for b in blocks
                    if b.get("type") == "text").strip()
+
+
+# Modeles Gemini acceptant thinkingConfig, decouvert au premier appel : les
+# variantes Lite le refusent avec un 400 alors qu'elles ne reflechissent pas.
+_GEMINI_THINKING_PARAM = {}
 
 
 def call_gemini(system_prompt, history):
@@ -199,15 +212,32 @@ def call_gemini(system_prompt, history):
         })
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_KEY}"
-    r = requests.post(
-        url,
-        json={"contents": contents, "generationConfig": {"maxOutputTokens": 700}},
-        timeout=30,
-    )
+    config = {"maxOutputTokens": 700}
+    # Les tokens de "reflexion" des modeles recents sont decomptes du plafond de
+    # sortie : gemini-3.5-flash en consommait 668 sur 700 et rendait une reponse
+    # coupee en plein mot. Augmenter le plafond ne suffit pas, le modele
+    # reflechit d'autant plus (1893 tokens sur 2000). On la coupe donc : sur des
+    # reponses de 15 lignes de 40 colonnes, elle n'apporte rien.
+    if _GEMINI_THINKING_PARAM.get(GEMINI_MODEL, True):
+        config["thinkingConfig"] = {"thinkingBudget": 0}
+
+    r = requests.post(url, json={"contents": contents, "generationConfig": config}, timeout=30)
+    if r.status_code == 400 and "thinkingConfig" in config:
+        # Certains modeles (les variantes Lite) refusent ce parametre. Ils ne
+        # reflechissent pas de toute facon : on retient le refus pour ne pas
+        # rejouer l'aller-retour a chaque question, et on repart sans.
+        log.info("Gemini %s refuse thinkingConfig : appels suivants sans", GEMINI_MODEL)
+        _GEMINI_THINKING_PARAM[GEMINI_MODEL] = False
+        del config["thinkingConfig"]
+        r = requests.post(url, json={"contents": contents, "generationConfig": config}, timeout=30)
     r.raise_for_status()
+
     data = r.json()
     parts = []
     for candidate in data.get("candidates", []):
+        if candidate.get("finishReason") == "MAX_TOKENS":
+            log.warning("Reponse Gemini tronquee (plafond de %d tokens atteint)",
+                        config["maxOutputTokens"])
         for part in candidate.get("content", {}).get("parts", []):
             text = part.get("text", "") if isinstance(part, dict) else ""
             if text:
