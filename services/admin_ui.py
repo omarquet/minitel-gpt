@@ -135,17 +135,26 @@ def write_env_key(key, value):
         lines.append(f"{key}={value}")
     ENV_FILE.write_text("\n".join(lines) + "\n")
 
+def env_or_default(name, default):
+    """Valeur d'un reglage : .env d'abord, puis variable d'environnement, puis
+    defaut. Le repli sur l'environnement est indispensable en conteneur : sans
+    volume persistant il n'y a pas de .env, et la configuration vient des
+    variables d'environnement. Sans lui, l'admin affichait toujours le modele
+    par defaut du code au lieu du modele reellement utilise."""
+    return read_env().get(name) or os.getenv(name) or default
+
+
 def mistral_key():
     return read_env().get("MISTRAL_KEY", os.getenv("MISTRAL_KEY", ""))
 
 def mistral_model():
-    return read_env().get("MISTRAL_MODEL", "mistral-small-latest")
+    return env_or_default("MISTRAL_MODEL", "mistral-small-latest")
 
 def anthropic_key():
     return read_env().get("ANTHROPIC_KEY", os.getenv("ANTHROPIC_KEY", ""))
 
 def claude_model():
-    return read_env().get("CLAUDE_MODEL", "claude-haiku-4-5")
+    return env_or_default("CLAUDE_MODEL", "claude-haiku-4-5")
 
 def gemini_key():
     env = read_env()
@@ -153,7 +162,7 @@ def gemini_key():
             or os.getenv("GEMINI_KEY") or os.getenv("GEMINI_API_KEY") or "")
 
 def gemini_model():
-    return read_env().get("GEMINI_MODEL", "gemini-3.1-flash-lite")
+    return env_or_default("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
 def llm_provider():
     p = read_env().get("LLM_PROVIDER", os.getenv("LLM_PROVIDER", "mistral")).strip().lower()
@@ -162,31 +171,43 @@ def llm_provider():
 def mask_key(k):
     return (k[:6] + "..." + k[-4:]) if len(k) > 12 else ("(définie)" if k else "(absente)")
 
-# Modèles proposés (id, libellé avec coût + pertinence). Le terminal n'affiche
-# que 40 colonnes et répond court → un modèle léger suffit largement.
+# Modèles proposés (id, libellé). Aucun tarif n'est affiché : les prix bougent,
+# et ceux qui figuraient ici étaient faux - Mistral Large était présenté comme le
+# plus cher alors qu'il coûte trois fois moins que Medium. Un chiffre faux dans
+# une interface de configuration est pire que pas de chiffre du tout.
+# Le terminal n'affiche que 40 colonnes et répond court : un modèle léger suffit.
 MISTRAL_MODELS = [
-    ("ministral-8b-latest",  "Ministral 8B - le moins cher, très rapide (~0,10 $/M)"),
-    ("mistral-small-latest", "Mistral Small - bon équilibre, recommandé (~0,20 $/M)"),
-    ("mistral-medium-latest","Mistral Medium - plus pertinent (~0,40 $/M entrée)"),
-    ("mistral-large-latest", "Mistral Large - le plus pertinent (~2 $/M entrée)"),
+    ("ministral-8b-latest",  "Ministral 8B - le plus léger et rapide"),
+    ("mistral-small-latest", "Mistral Small - bon équilibre, recommandé"),
+    ("mistral-medium-latest","Mistral Medium - plus pertinent"),
+    ("mistral-large-latest", "Mistral Large - le plus pertinent"),
 ]
 CLAUDE_MODELS = [
-    ("claude-haiku-4-5",  "Claude Haiku 4.5 - le moins cher, rapide, recommandé (1 $ / 5 $ par M)"),
-    ("claude-sonnet-4-6", "Claude Sonnet 4.6 - équilibre vitesse/intelligence (3 $ / 15 $ par M)"),
-    ("claude-opus-4-8",   "Claude Opus 4.8 - le plus pertinent, plus cher (5 $ / 25 $ par M)"),
+    ("claude-haiku-4-5",  "Claude Haiku 4.5 - le plus rapide, recommandé"),
+    ("claude-sonnet-5",   "Claude Sonnet 5 - équilibre vitesse/intelligence"),
+    ("claude-opus-5",     "Claude Opus 5 - le plus pertinent"),
 ]
-# Identifiants verifies via l'API ListModels de Google. Pas de tarif indique :
-# contrairement a Mistral et Claude, ceux de ces modeles ne sont pas connus ici
-# et mieux vaut ne rien afficher qu'un chiffre invente.
+# Identifiants vérifiés via l'API ListModels de Google.
 GEMINI_MODELS = [
-    ("gemini-3.1-flash-lite", "Gemini 3.1 Flash Lite - le plus leger et rapide, recommandé"),
-    ("gemini-3.5-flash",      "Gemini 3.5 Flash - bon équilibre"),
+    ("gemini-3.5-flash-lite", "Gemini 3.5 Flash Lite - léger et rapide, recommandé"),
+    ("gemini-3.1-flash-lite", "Gemini 3.1 Flash Lite - génération Lite précédente"),
+    ("gemini-3.5-flash",      "Gemini 3.5 Flash - plus pertinent, un peu plus lent"),
     ("gemini-3.7-flash",      "Gemini 3.7 Flash - le plus récent des Flash"),
-    ("gemini-2.5-pro",        "Gemini 2.5 Pro - le plus pertinent, plus lent"),
+    ("gemini-2.5-pro",        "Gemini 2.5 Pro - le plus pertinent, le plus lent"),
 ]
 MISTRAL_MODEL_IDS = {m[0] for m in MISTRAL_MODELS}
 CLAUDE_MODEL_IDS = {m[0] for m in CLAUDE_MODELS}
 GEMINI_MODEL_IDS = {m[0] for m in GEMINI_MODELS}
+
+
+def with_current(models, current):
+    """Liste a afficher dans un selecteur, en garantissant que le modele
+    reellement configure y figure. Sans cela, un modele defini cote hebergeur
+    mais absent de la liste laisse le selecteur sur sa premiere entree, ce qui
+    affiche un modele qui n'est pas celui utilise."""
+    if current and current not in {m[0] for m in models}:
+        return [(current, f"{current} - configuré hors liste")] + list(models)
+    return list(models)
 
 # ── Auth ─────────────────────────────────────────────────────────────────
 def require_login(f):
@@ -674,8 +695,9 @@ def index():
         mistral_key_masked=mask_key(mistral_key()), mistral_model=mistral_model(),
         claude_key_masked=mask_key(anthropic_key()), claude_model=claude_model(),
         gemini_key_masked=mask_key(gemini_key()), gemini_model=gemini_model(),
-        mistral_models=MISTRAL_MODELS, claude_models=CLAUDE_MODELS,
-        gemini_models=GEMINI_MODELS,
+        mistral_models=with_current(MISTRAL_MODELS, mistral_model()),
+        claude_models=with_current(CLAUDE_MODELS, claude_model()),
+        gemini_models=with_current(GEMINI_MODELS, gemini_model()),
         flash=flash, flash_ok=flash_ok)
 
 @app.route("/save-prompt", methods=["POST"])
