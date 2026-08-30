@@ -448,8 +448,11 @@ def render_logo(preset):
     art = (preset.get("logo_art") or "").strip("\n")
     if art.strip():
         return [ln[:LOGO_MAX_COLS] for ln in art.split("\n")][:LOGO_MAX_LINES]
-    word = (preset.get("logo_text") or "").strip()
-    if word:
+    # Le mot est passe tel quel a pyfiglet, espaces de bord compris : ils
+    # decalent le rendu et permettent d'ajuster le centrage. Seul un champ
+    # entierement blanc compte comme vide.
+    word = preset.get("logo_text") or ""
+    if word.strip():
         lines = figlet_lines(word, (preset.get("logo_font") or "small").strip())
         if lines:
             return lines

@@ -493,7 +493,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
           MINITEL GPT. Le dessin libre, s'il est rempli, l'emporte sur le mot.
           Maximum {{logo_max_cols}} colonnes et {{logo_max_lines}} lignes : au-delà, c'est coupé.</p>
         <label>Mot à dessiner</label>
-        <input type=text name=logo_text id=flogotext maxlength=20 placeholder="ex. aqoba (vide = logo par défaut)">
+        <input type=text name=logo_text id=flogotext maxlength=20 placeholder="vide = logo par défaut">
         <label>Police</label>
         <select name=logo_font id=flogofont>
           {% for f in logo_fonts %}
@@ -743,7 +743,9 @@ def save_logo_fields(p):
     dessin a du être rogné. Un dessin trop large ne se voit pas dans le
     formulaire mais saute aux yeux sur le Minitel : autant le dire tout de
     suite plutôt que de laisser découvrir la coupure à l'écran."""
-    p["logo_text"] = to_minitel_ascii(request.form.get("logo_text", ""))[:20].strip()
+    # Pas de strip() : un espace en debut ou en fin decale le rendu et sert a
+    # rattraper le centrage, qui tombe a la colonne pres selon la parite.
+    p["logo_text"] = to_minitel_ascii(request.form.get("logo_text", ""))[:20]
     font = request.form.get("logo_font", DEFAULTS["logo_font"]).strip()
     p["logo_font"] = font if font in LOGO_FONTS else DEFAULTS["logo_font"]
 
