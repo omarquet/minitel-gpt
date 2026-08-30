@@ -67,6 +67,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <WebSocketsClient.h>
+#include <esp_system.h>   // esp_reset_reason() : cause du dernier demarrage
 // WIFI_SSID / WIFI_PASSWORD / WS_TOKEN_ENC. Fichier ignore par git : le creer
 // a partir de secrets.h.example (meme dossier).
 #include "secrets.h"
@@ -191,6 +192,24 @@ void setup() {
   while (!Serial && millis() - t0 < 2000) delay(10);
   Minitel.begin(1200, SERIAL_7E1, MINITEL_RX, MINITEL_TX);
 
+  // Cause du dernier demarrage : distingue un redemarrage volontaire du filet
+  // WiFi (SW) d'un plantage (PANIC), d'un watchdog, ou d'une alimentation qui
+  // decroche (BROWNOUT) - ces derniers n'ont rien a voir avec le WiFi.
+  const char* cause;
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:  cause = "mise sous tension";                    break;
+    case ESP_RST_EXT:      cause = "bouton RESET";                         break;
+    case ESP_RST_SW:       cause = "ESP.restart() (filet WiFi)";           break;
+    case ESP_RST_PANIC:    cause = "PLANTAGE (exception)";                 break;
+    case ESP_RST_INT_WDT:  cause = "WATCHDOG interruptions";               break;
+    case ESP_RST_TASK_WDT: cause = "WATCHDOG tache";                       break;
+    case ESP_RST_WDT:      cause = "WATCHDOG";                             break;
+    case ESP_RST_BROWNOUT: cause = "BROWNOUT (alimentation insuffisante)"; break;
+    case ESP_RST_DEEPSLEEP:cause = "sortie de veille profonde";            break;
+    default:               cause = "inconnue";                             break;
+  }
+  Serial.printf("[BOOT] cause du dernier demarrage : %s\n", cause);
+
   pinMode(STATUS_LED, OUTPUT);
   digitalWrite(STATUS_LED, LED_OFF);
 
@@ -256,15 +275,29 @@ void loop() {
   // (box qui redemarre, hors de portee), mais PAS les raisons AUTH_FAIL ou
   // ASSOC_LEAVE, qui laisseraient la carte morte jusqu'a un reset physique.
   static unsigned long wifiDownSince = 0;
+  static bool wifiRetried = false;
   if (WiFi.status() != WL_CONNECTED) {
     if (wifiDownSince == 0) {
       wifiDownSince = millis();
+      wifiRetried = false;
+      Serial.println("[WiFi] perdu, attente de la reconnexion automatique");
+    } else if (!wifiRetried && millis() - wifiDownSince > 30000) {
+      // L'auto-reconnexion du core peut s'enliser : on la relance une fois
+      // explicitement avant d'envisager le redemarrage.
+      wifiRetried = true;
+      Serial.println("[WiFi] 30 s sans reseau -> relance de la connexion");
+      WiFi.disconnect();
+      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     } else if (millis() - wifiDownSince > 120000) {
-      Serial.println("[WiFi] absent depuis 2 min -> redemarrage");
+      Serial.println("[WiFi] 2 min sans reseau -> redemarrage");
       Serial.flush();
       ESP.restart();
     }
   } else {
+    if (wifiDownSince != 0) {
+      Serial.printf("[WiFi] retabli apres %lu s\n",
+                    (millis() - wifiDownSince) / 1000);
+    }
     wifiDownSince = 0;
   }
 
