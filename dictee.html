@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<!-- Pensée pour Safari iOS : pas de zoom au focus (champs >= 16px), zone sûre
+     respectée, aucune dépendance externe, tout tient dans ce fichier.
+     L'API SpeechRecognition n'est PAS utilisée (mal supportée sur iOS) : on
+     dicte dans le <textarea> avec le micro du clavier natif. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Dictée Minitel</title>
+<style>
+  :root {
+    --bg: #0b0f14; --card: #151b23; --line: #26303c;
+    --fg: #e6edf3; --dim: #8b98a5; --accent: #29c46b; --warn: #f0b429; --bad: #ef5350;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; padding: env(safe-area-inset-top) 14px calc(env(safe-area-inset-bottom) + 14px);
+    background: var(--bg); color: var(--fg);
+    font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  }
+  h1 { font-size: 17px; margin: 14px 0 10px; letter-spacing: .04em; text-transform: uppercase; color: var(--dim); }
+  #banner {
+    padding: 10px 12px; border-radius: 10px; font-size: 15px; margin-bottom: 12px;
+    background: #1b2a1f; border: 1px solid #2c5a3a;
+  }
+  #banner.bad { background: #2a1b1b; border-color: #5a2c2c; }
+  .modes { display: flex; gap: 8px; margin-bottom: 12px; }
+  .modes button {
+    flex: 1; padding: 12px 8px; font-size: 15px; border-radius: 10px;
+    background: var(--card); color: var(--dim); border: 1px solid var(--line);
+  }
+  .modes button.on { background: #1d2b3a; color: var(--fg); border-color: #3d6a99; }
+  .modes .hint { display: block; font-size: 12px; color: var(--dim); margin-top: 3px; }
+  textarea {
+    width: 100%; min-height: 140px; padding: 12px; border-radius: 12px;
+    background: var(--card); color: var(--fg); border: 1px solid var(--line);
+    font: 18px/1.45 -apple-system, sans-serif; resize: vertical;
+  }
+  .meta { display: flex; justify-content: space-between; margin: 8px 0 4px; font-size: 13px; color: var(--dim); }
+  .meta .warn { color: var(--warn); }
+  #preview {
+    background: #06090c; border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px; min-height: 44px; color: var(--accent);
+    font: 14px/1.3 ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-word;
+  }
+  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+  button.big {
+    padding: 18px 10px; font-size: 17px; font-weight: 600; border-radius: 12px;
+    border: 1px solid var(--line); background: var(--card); color: var(--fg);
+  }
+  button.big:active { opacity: .6; }
+  button.primary { grid-column: 1 / -1; background: #14532d; border-color: #2c7a4b; }
+  button.envoi { background: #1e3a5f; border-color: #3d6a99; }
+  #log { margin-top: 12px; font-size: 13px; color: var(--dim); min-height: 18px; }
+</style>
+</head>
+<body>
+
+<h1>Dictée &rarr; Minitel</h1>
+<div id="banner">Connexion…</div>
+
+<div class="modes">
+  <button id="mDirect" type="button">Direct<span class="hint">au fil de la dictée</span></button>
+  <button id="mValider" type="button">Valider<span class="hint">relire puis envoyer</span></button>
+</div>
+
+<textarea id="txt" placeholder="Appuyez sur le micro du clavier iOS et parlez…"
+          autocapitalize="sentences" autocomplete="off" spellcheck="true"></textarea>
+
+<div class="meta">
+  <span>Tel quel sur le Minitel :</span>
+  <span id="count">0 car.</span>
+</div>
+<div id="preview">(vide)</div>
+
+<div class="actions">
+  <button class="big primary" id="bSend" type="button">Envoyer sur le Minitel</button>
+  <button class="big envoi" id="bEnvoi" type="button">ENVOI (valider)</button>
+  <button class="big" id="bClear" type="button">Effacer</button>
+</div>
+
+<div id="log"></div>
+
+<script>
+// Le jeton vient de l'URL (?token=...), le même que /ws : rien n'est stocké
+// dans la page. Le serveur refuse /dictee et /dictee/inject sans lui.
+const TOKEN = new URLSearchParams(location.search).get('token') || '';
+const url = p => p + (TOKEN ? '?token=' + encodeURIComponent(TOKEN) : '');
+
+const ta = document.getElementById('txt');
+const preview = document.getElementById('preview');
+const count = document.getElementById('count');
+const banner = document.getElementById('banner');
+const logEl = document.getElementById('log');
+
+let sent = '';              // ce qui est déjà affiché sur le Minitel
+let mode = 'valider';       // 'direct' | 'valider'
+let chain = Promise.resolve();
+let timer = null;
+
+// Copie exacte de _ASCII_REPL (minitel_gpt.py) : la longueur calculée ici
+// doit correspondre au caractère près à ce que le Minitel affiche, puisque
+// c'est elle qui sert à compter les effacements (back). Tout caractère hors
+// table est décomposé (NFKD) puis jeté, exactement comme to_ascii() - un
+// tiret cadratin, absent de la table, disparaît donc des deux côtés.
+const REPL = {
+  '\u0153':'oe','\u0152':'OE','\u00e6':'ae','\u00c6':'AE','\u20ac':'EUR',
+  '\u2019':"'",'\u2018':"'",'\u201c':'"','\u201d':'"','\u00ab':'"','\u00bb':'"',
+  '\u2013':'-','\u2026':'...','\u00a0':' ','\u00b7':'.','\u2022':'-'
+};
+function toAscii(s) {
+  // read_question traite CR et LF comme ENVOI : jamais de saut de ligne.
+  s = s.replace(/[\r\n\t]+/g, ' ');
+  s = s.replace(/[^\x20-\x7e]/g, c => (REPL[c] !== undefined ? REPL[c] : c));
+  return s.normalize('NFKD').replace(/[^\x20-\x7e]/g, '');
+}
+
+function setBanner(ok, msg) {
+  banner.textContent = msg;
+  banner.className = ok ? '' : 'bad';
+}
+function note(msg) { logEl.textContent = msg; }
+
+function render() {
+  const n = toAscii(ta.value);
+  preview.textContent = n || '(vide)';
+  count.textContent = n.length + ' car.';
+  // 18 lignes de contenu utiles sur 40 colonnes : au-delà, la saisie
+  // commence à remplir l'écran du Minitel.
+  count.className = n.length > 200 ? 'warn' : '';
+}
+
+// Les requêtes sont sérialisées : deux envois qui se croisent arriveraient
+// dans le désordre et décaleraient les effacements.
+function enqueue(task) {
+  const p = chain.then(task);
+  chain = p.then(() => {}, () => {});
+  return p;
+}
+
+async function send(body) {
+  try {
+    const r = await fetch(url('/dictee/inject'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 409 || j.error === 'no_session') {
+      setBanner(false, "Aucune session Minitel active : rien n'a été envoyé.");
+      return false;
+    }
+    if (r.status === 403) { setBanner(false, 'Jeton refusé : vérifiez ?token=… dans l’URL.'); return false; }
+    if (!r.ok) { setBanner(false, 'Erreur serveur ' + r.status + '.'); return false; }
+    if (j.dropped) note('File pleine : ' + j.dropped + ' caractère(s) ignoré(s).');
+    setBanner(true, j.ready
+      ? 'Minitel prêt (en attente de saisie).'
+      : 'Minitel occupé : le texte partira à la prochaine saisie.');
+    return true;
+  } catch (e) {
+    setBanner(false, 'Serveur injoignable.');
+    return false;
+  }
+}
+
+// La dictée iOS réécrit ses phrases en cours de route (ponctuation,
+// majuscules) : on n'envoie donc pas un simple ajout mais la différence,
+// préfixe commun gardé, le reste effacé puis réécrit. BS est rendu à l'écran
+// par read_question (backspace destructif).
+function diff(sent, target) {
+  let i = 0;
+  while (i < sent.length && i < target.length && sent[i] === target[i]) i++;
+  return { back: sent.length - i, text: target.slice(i) };
+}
+
+function sync() {
+  return enqueue(async () => {
+    const target = toAscii(ta.value);
+    if (target === sent) return true;
+    const ok = await send(diff(sent, target));
+    if (ok) sent = target;
+    return ok;
+  });
+}
+
+async function envoi() {
+  await sync();
+  const ok = await enqueue(() => send({ cr: true }));
+  if (ok) { sent = ''; ta.value = ''; render(); note('ENVOI transmis.'); }
+}
+
+function effacer() {
+  ta.value = '';
+  render();
+  return enqueue(async () => {
+    if (!sent.length) { note('Zone de texte vidée.'); return true; }
+    const ok = await send({ back: sent.length });
+    if (ok) { sent = ''; note('Ligne effacée sur le Minitel.'); }
+    return ok;
+  });
+}
+
+function setMode(m) {
+  mode = m;
+  document.getElementById('mDirect').className = (m === 'direct' ? 'on' : '');
+  document.getElementById('mValider').className = (m === 'valider' ? 'on' : '');
+  if (m === 'direct') sync();          // rattrape ce qui est déjà tapé
+}
+
+ta.addEventListener('input', () => {
+  render();
+  if (mode !== 'direct') return;
+  clearTimeout(timer);
+  timer = setTimeout(sync, 250);       // la dictée iOS écrit par rafales
+});
+
+document.getElementById('mDirect').onclick = () => setMode('direct');
+document.getElementById('mValider').onclick = () => setMode('valider');
+document.getElementById('bSend').onclick = sync;
+document.getElementById('bEnvoi').onclick = envoi;
+document.getElementById('bClear').onclick = effacer;
+
+async function status() {
+  try {
+    const r = await fetch(url('/dictee/status'));
+    if (r.status === 403) { setBanner(false, 'Jeton refusé : vérifiez ?token=… dans l’URL.'); return; }
+    const j = await r.json();
+    if (!j.sessions) {
+      setBanner(false, "Aucun Minitel connecté. Branchez l'ESP32 (ou ouvrez minitel-test.html), puis patientez.");
+      return;
+    }
+    let msg = j.ready ? 'Minitel prêt (en attente de saisie).' : 'Minitel occupé (réponse à l’écran).';
+    if (j.pending) msg += ' ' + j.pending + ' caractère(s) en attente.';
+    if (j.sessions > 1) msg += ' ' + j.sessions + ' sessions : la dernière connectée reçoit la dictée.';
+    setBanner(true, msg);
+  } catch (e) {
+    setBanner(false, 'Serveur injoignable.');
+  }
+}
+
+setMode('valider');
+render();
+status();
+setInterval(status, 3000);
+</script>
+</body>
+</html>

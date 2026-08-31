@@ -40,6 +40,8 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   `show_guide_ws()` (touche GUIDE) permet aussi de changer de personnalité
   active directement depuis le Minitel (liste numérotée, écrit `data["active"]`
   dans `prompts.json`), en plus d'afficher l'URL de l'admin.
+  Sert enfin la dictée depuis un téléphone : `/dictee` (la page), `/dictee/status`
+  et `/dictee/inject`, adossés au registre `SESSIONS` des sessions ouvertes.
 - `Dockerfile` + `entrypoint.sh` + `requirements.txt` — image Python 3.11,
   lancée par gunicorn (`-k gthread`). L'entrypoint amorce le volume config.
 - `docker-compose.yml` — pour le serveur, volume `minitel-config` persistant.
@@ -51,6 +53,12 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
 - `minitel-test.html` — émulateur Minitel navigateur qui parle le MÊME
   protocole WebSocket binaire que l'ESP32 (rendu Videotex 40 col, touches SEP),
   URL et token WS configurables dans l'interface. Sert à tester SANS matériel.
+- `dictee.html` — page servie sur `/dictee?token=...`, pensée pour Safari iOS :
+  on dicte dans un `<textarea>` avec le micro du clavier natif (l'API
+  SpeechRecognition n'est PAS utilisée, mal supportée sur iOS) et le texte
+  s'écrit sur le Minitel dans la session en cours. Deux modes (au fil de la
+  dictée / relire puis envoyer), boutons ENVOI et Effacer. Un seul fichier,
+  aucune dépendance externe.
 - `DEPLOY.md` — guide de déploiement pas à pas.
 
 ## Points techniques importants / pièges
@@ -90,9 +98,30 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   test/la génération de prompt dans l'admin, qui relit `.env` à chaque appel).
 - **Sécurité `/ws`** : par défaut, aucune authentification — n'importe qui
   connaissant l'URL publique peut discuter et consommer la clé API. Si
-  `WS_TOKEN` est configuré côté serveur, `/ws`, `/ws-echo` et `/ws-gemini`
-  exigent `?token=...` en query string (sinon connexion refusée en silence).
+  `WS_TOKEN` est configuré côté serveur, `/ws`, `/ws-echo`, `/ws-gemini` et les
+  routes de dictée (`/dictee`, `/dictee/status`, `/dictee/inject`, via le même
+  `ws_token_valid()`) exigent `?token=...` en query string (connexion WebSocket
+  refusée en silence, 403 sur les routes HTTP).
   L'ESP32 doit inclure le même token dans `WS_PATH` (voir le `.ino`).
+- **Dictée téléphone → Minitel** : le téléphone ne se connecte SURTOUT PAS à
+  `/ws` (chaque connexion y lance sa propre `run_session`, il ouvrirait une 2e
+  conversation au lieu d'écrire dans celle du Minitel). Il fait du HTTP sur
+  `/dictee/inject`, qui dépose les octets dans une file portée par le `WSTerm`
+  de la session ; `read_byte()` la vide avant d'interroger la WebSocket, donc
+  `read_question` reçoit de vraies frappes. Trois pièges :
+  1. **Écho.** `read_question` ne ré-échoie pas les frappes, c'est le Minitel
+     qui affiche en local ce qu'on tape sur son clavier. Un caractère dicté
+     n'ayant jamais été tapé, `_pop_injected()` doit l'écrire lui-même - et
+     uniquement l'imprimable, sinon les frappes physiques doubleraient (`BS`
+     est déjà rendu par `read_question`, `CR` vaut ENVOI).
+  2. **Fenêtre d'écoulement.** La file n'est consommée que pendant
+     `read_question` (`with t.injection_allowed():` dans `run_session`) :
+     `show_response` ignore les caractères, les afficher écraserait la page.
+     Ce qui est dicté pendant la lecture d'une réponse attend son tour.
+  3. **Alignement des effacements.** La page envoie un diff (`back` en `BS` +
+     suffixe) parce que la dictée iOS réécrit ses phrases en cours de route.
+     Son `toAscii()` recopie donc `_ASCII_REPL` à l'identique : si les deux
+     translittérations divergent d'un caractère, `back` efface à côté.
 - **Prompt système en deux couches** : un preset peut avoir
   `"prompt_file": "nom.txt"` (fichier dans `config/prompts/`) au lieu d'un
   `"prompt"` échappé sur une seule ligne. `resolve_prompt()`
@@ -128,9 +157,15 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
 - [x] Firmware prêt pour la prod : identifiants sortis du fichier suivi
       (`firmware/secrets.h`, ignoré ; modèle `secrets.h.example`), `WS_PATH`
       avec token URL-encodé, reconnexion WiFi/WS durcie, LED de statut.
+- [x] Dictée vocale depuis l'iPhone (`/dictee`) : injection dans la session en
+      cours, écho serveur, effet machine à écrire. Validée sans matériel
+      (fausse WebSocket + vraie `read_question`, écran Videotex simulé, dictée
+      iOS rejouée) ; reste à essayer sur le vrai Minitel.
 - [ ] Flash du firmware sur la carte et test bout en bout depuis le Minitel.
 - [ ] `WS_TOKEN` de production trop court (5 caractères) : à remplacer par une
       valeur aléatoire longue côté variables d'environnement du serveur.
+      D'autant plus prioritaire depuis la dictée : le jeton se retrouve dans
+      l'URL, donc dans l'historique Safari du téléphone.
 
 ## Prochaines pistes possibles
 
