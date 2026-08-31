@@ -502,10 +502,16 @@ def _printable(text):
 
 
 @app.route("/dictee")
+@app.route("/dictee.html")          # alias : minitel-test.html garde son extension
 def dictee_page():
-    """Page de dictee pour telephone, protegee par le meme jeton que /ws."""
-    if not ws_token_valid():
-        return "Jeton absent ou invalide (?token=...)", 403
+    """Page de dictee pour telephone.
+
+    Seule route de la dictee a ne PAS exiger le jeton : il ne doit pas rester
+    dans l'URL, le telephone passant de main en main (barre d'adresse,
+    historique Safari, partage de lien). La page ne contient aucun secret et
+    ne sert a rien sans jeton, qui est saisi une fois puis garde dans le
+    localStorage du telephone ; ce sont /dictee/status et /dictee/inject qui
+    le verifient a chaque appel."""
     html_path = Path(__file__).resolve().parent.parent / "dictee.html"
     return send_file(html_path, mimetype="text/html")
 

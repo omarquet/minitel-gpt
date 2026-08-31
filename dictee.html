@@ -54,11 +54,35 @@
   button.primary { grid-column: 1 / -1; background: #14532d; border-color: #2c7a4b; }
   button.envoi { background: #1e3a5f; border-color: #3d6a99; }
   #log { margin-top: 12px; font-size: 13px; color: var(--dim); min-height: 18px; }
+  #setup p { color: var(--dim); font-size: 14px; }
+  #setup input {
+    width: 100%; padding: 14px; margin: 10px 0; border-radius: 10px;
+    background: var(--card); color: var(--fg); border: 1px solid var(--line); font-size: 17px;
+  }
+  #setupMsg { color: var(--bad); font-size: 14px; min-height: 18px; }
+  #oublier {
+    display: block; width: 100%; margin-top: 18px; padding: 10px; font-size: 13px;
+    background: none; border: none; color: var(--dim); text-decoration: underline;
+  }
 </style>
 </head>
 <body>
 
 <h1>Dictée &rarr; Minitel</h1>
+
+<!-- Le jeton est saisi une fois puis gardé dans le téléphone : il ne reste
+     ni dans l'URL ni à l'écran, l'appareil passant de main en main. -->
+<section id="setup" hidden>
+  <p>Entrez le jeton une seule fois : il sera gardé sur ce téléphone et
+     n'apparaîtra plus, ni ici ni dans la barre d'adresse.</p>
+  <input id="tok" type="password" inputmode="text" autocomplete="off"
+         autocapitalize="off" autocorrect="off" spellcheck="false"
+         placeholder="jeton" />
+  <div id="setupMsg"></div>
+  <button class="big primary" id="bTok" type="button">Enregistrer</button>
+</section>
+
+<section id="app" hidden>
 <div id="banner">Connexion…</div>
 
 <div class="modes">
@@ -82,12 +106,59 @@
 </div>
 
 <div id="log"></div>
+<button id="oublier" type="button">Oublier le jeton sur ce téléphone</button>
+</section>
 
 <script>
-// Le jeton vient de l'URL (?token=...), le même que /ws : rien n'est stocké
-// dans la page. Le serveur refuse /dictee et /dictee/inject sans lui.
-const TOKEN = new URLSearchParams(location.search).get('token') || '';
+// Le jeton, le même que /ws, protège /dictee/status et /dictee/inject (la
+// page elle-même n'en a pas besoin, elle ne contient aucun secret). On le
+// prend une fois dans l'URL, on le range dans le téléphone, et on nettoie
+// aussitôt la barre d'adresse : il ne doit être visible nulle part, l'appareil
+// passant de main en main.
+const KEY = 'minitel-dictee-token';
+let TOKEN = '';
 const url = p => p + (TOKEN ? '?token=' + encodeURIComponent(TOKEN) : '');
+
+function remember(tok) {
+  try { localStorage.setItem(KEY, tok); } catch (e) { /* navigation privée */ }
+}
+function forget() {
+  try { localStorage.removeItem(KEY); } catch (e) {}
+  TOKEN = '';
+  showApp(false);
+}
+function storedToken() {
+  const fromUrl = new URLSearchParams(location.search).get('token');
+  if (fromUrl) {
+    remember(fromUrl);
+    history.replaceState(null, '', location.pathname);   // ni barre d'adresse ni historique
+    return fromUrl;
+  }
+  try { return localStorage.getItem(KEY) || ''; } catch (e) { return ''; }
+}
+function showApp(on) {
+  document.getElementById('app').hidden = !on;
+  document.getElementById('setup').hidden = on;
+}
+
+// Un jeton refusé ne doit pas laisser la page tourner dans le vide.
+async function useToken(tok) {
+  TOKEN = (tok || '').trim();
+  if (!TOKEN) { showApp(false); return false; }
+  let r = null;
+  try { r = await fetch(url('/dictee/status')); } catch (e) {}
+  if (r && r.status === 403) {
+    forget();                              // sinon il rejoue le 403 à chaque ouverture
+    document.getElementById('setupMsg').textContent = 'Jeton refusé.';
+    return false;
+  }
+  remember(TOKEN);
+  document.getElementById('setupMsg').textContent = '';
+  document.getElementById('tok').value = '';
+  showApp(true);
+  status();
+  return true;
+}
 
 const ta = document.getElementById('txt');
 const preview = document.getElementById('preview');
@@ -152,7 +223,7 @@ async function send(body) {
       setBanner(false, "Aucune session Minitel active : rien n'a été envoyé.");
       return false;
     }
-    if (r.status === 403) { setBanner(false, 'Jeton refusé : vérifiez ?token=… dans l’URL.'); return false; }
+    if (r.status === 403) { forget(); return false; }
     if (!r.ok) { setBanner(false, 'Erreur serveur ' + r.status + '.'); return false; }
     if (j.dropped) note('File pleine : ' + j.dropped + ' caractère(s) ignoré(s).');
     setBanner(true, j.ready
@@ -223,9 +294,10 @@ document.getElementById('bEnvoi').onclick = envoi;
 document.getElementById('bClear').onclick = effacer;
 
 async function status() {
+  if (!TOKEN) return;
   try {
     const r = await fetch(url('/dictee/status'));
-    if (r.status === 403) { setBanner(false, 'Jeton refusé : vérifiez ?token=… dans l’URL.'); return; }
+    if (r.status === 403) { forget(); return; }
     const j = await r.json();
     if (!j.sessions) {
       setBanner(false, "Aucun Minitel connecté. Branchez l'ESP32 (ou ouvrez minitel-test.html), puis patientez.");
@@ -240,9 +312,15 @@ async function status() {
   }
 }
 
+document.getElementById('bTok').onclick = () => useToken(document.getElementById('tok').value);
+document.getElementById('tok').addEventListener('keydown', e => {
+  if (e.key === 'Enter') useToken(document.getElementById('tok').value);
+});
+document.getElementById('oublier').onclick = forget;
+
 setMode('valider');
 render();
-status();
+useToken(storedToken());
 setInterval(status, 3000);
 </script>
 </body>

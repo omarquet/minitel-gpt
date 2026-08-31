@@ -53,12 +53,16 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
 - `minitel-test.html` — émulateur Minitel navigateur qui parle le MÊME
   protocole WebSocket binaire que l'ESP32 (rendu Videotex 40 col, touches SEP),
   URL et token WS configurables dans l'interface. Sert à tester SANS matériel.
-- `dictee.html` — page servie sur `/dictee?token=...`, pensée pour Safari iOS :
+- `dictee.html` — page servie sur `/dictee` (et `/dictee.html`), pensée pour Safari iOS :
   on dicte dans un `<textarea>` avec le micro du clavier natif (l'API
   SpeechRecognition n'est PAS utilisée, mal supportée sur iOS) et le texte
   s'écrit sur le Minitel dans la session en cours. Deux modes (au fil de la
   dictée / relire puis envoyer), boutons ENVOI et Effacer. Un seul fichier,
-  aucune dépendance externe.
+  aucune dépendance externe. Le jeton se saisit une fois (ou une seule fois par
+  `?token=...`, aussitôt effacé de la barre d'adresse via `history.replaceState`)
+  puis vit dans le `localStorage` du téléphone : il n'est visible nulle part,
+  l'appareil étant fait pour passer de main en main. Un 403 le fait oublier,
+  sinon il rejouerait le refus à chaque ouverture. Bouton « Oublier le jeton ».
 - `DEPLOY.md` — guide de déploiement pas à pas.
 
 ## Points techniques importants / pièges
@@ -96,12 +100,28 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   via l'admin (`/save-llm`) n'est pris en compte par le vrai terminal Minitel
   qu'après un redéploiement (déjà pris en compte immédiatement pour le
   test/la génération de prompt dans l'admin, qui relit `.env` à chaque appel).
+- **Le modèle replie ses lignes malgré la consigne** : le prompt lui interdit
+  d'insérer des retours à la ligne (`MINITEL_MARKUP_HELP`, et deux tentatives de
+  reformulation : `e247ced`, `cc2bb3e`), il le fait quand même, autour de 40
+  caractères. `wrap()` traitant chaque `\n` comme une fin de paragraphe, le mot
+  qui dépassait se retrouvait seul sur sa ligne (vu à l'écran : `...Marie-`
+  `Antoinette y` / `y` / `fut enfermée...`). `join_soft_wraps()` recolle donc
+  les lignes qui sont un repli subi, avant le découpage. Ne PAS recoller une
+  mise en page voulue : ligne vide, bloc `{art}`, titre en `{grand}` ou en
+  capitales, élément de liste, ligne « Adresse : ... », ou fin de phrase
+  (ponctuation finale). Le garde-fou décisif est la longueur : une ligne de
+  moins de `SOFT_WRAP_MIN_COLS` colonnes a été coupée volontairement, une ligne
+  pleine est un repli. Sans le garde-fou sur les labels, deux lignes
+  « Horaires : ... » / « Tarif : ... » sans point final fusionnaient.
 - **Sécurité `/ws`** : par défaut, aucune authentification — n'importe qui
   connaissant l'URL publique peut discuter et consommer la clé API. Si
   `WS_TOKEN` est configuré côté serveur, `/ws`, `/ws-echo`, `/ws-gemini` et les
-  routes de dictée (`/dictee`, `/dictee/status`, `/dictee/inject`, via le même
-  `ws_token_valid()`) exigent `?token=...` en query string (connexion WebSocket
-  refusée en silence, 403 sur les routes HTTP).
+  deux routes de données de la dictée (`/dictee/status`, `/dictee/inject`, via le
+  même `ws_token_valid()`) exigent `?token=...` en query string (connexion
+  WebSocket refusée en silence, 403 sur les routes HTTP). Seule exception
+  volontaire : la PAGE `/dictee` est servie sans jeton, sinon celui-ci resterait
+  dans l'URL du téléphone ; elle ne contient aucun secret et ne sert à rien sans
+  jeton, qu'elle garde dans son `localStorage`.
   L'ESP32 doit inclure le même token dans `WS_PATH` (voir le `.ino`).
 - **Dictée téléphone → Minitel** : le téléphone ne se connecte SURTOUT PAS à
   `/ws` (chaque connexion y lance sa propre `run_session`, il ouvrirait une 2e
