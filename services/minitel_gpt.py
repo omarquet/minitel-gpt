@@ -93,33 +93,71 @@ CONTENT_ROWS = 18          # lignes de contenu par page de réponse
 IDLE_TIMEOUT = 300         # 5 min → retour sommaire
 
 # ── Fournisseur d'IA (LLM) ───────────────────────────────────────────────
-# LLM_PROVIDER = "mistral" (defaut), "claude" ou "gemini". La cle et le
-# modele de chaque fournisseur sont independants ; on bascule sans perdre
-# l'autre configuration.
-PROVIDER = os.getenv("LLM_PROVIDER", "mistral").strip().lower()
-
-MISTRAL_KEY = os.environ.get("MISTRAL_KEY", "")
-MISTRAL_MODEL = os.getenv("MISTRAL_MODEL", "mistral-small-latest")
+# Fournisseur ("mistral" par defaut, "claude" ou "gemini"), cle et modele.
+# La cle et le modele de chaque fournisseur sont independants : on bascule
+# sans perdre l'autre configuration.
 MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions"
-
-# Claude (Anthropic) - appele en HTTP brut comme Mistral, sans SDK.
-ANTHROPIC_KEY = os.environ.get("ANTHROPIC_KEY", "")
-CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5")
+# Claude (Anthropic) et Gemini sont appeles en HTTP brut comme Mistral, sans SDK.
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 
-# Gemini - idem, HTTP brut.
-GEMINI_KEY = os.getenv("GEMINI_KEY") or os.getenv("GEMINI_API_KEY") or ""
-# Defaut aligne sur celui de l'admin (admin_ui.gemini_model) : le
-# precedent, gemini-2.0-flash, a ete retire par Google et repond 404.
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+# Reglage -> (variable d'environnement, defaut).
+_LLM_ENV = {
+    "provider":      ("LLM_PROVIDER", "mistral"),
+    "mistral_key":   ("MISTRAL_KEY", ""),
+    "mistral_model": ("MISTRAL_MODEL", "mistral-small-latest"),
+    "anthropic_key": ("ANTHROPIC_KEY", ""),
+    "claude_model":  ("CLAUDE_MODEL", "claude-haiku-4-5"),
+    "gemini_key":    ("GEMINI_KEY", ""),
+    # Defaut aligne sur celui de l'admin : le precedent, gemini-2.0-flash, a
+    # ete retire par Google et repond 404.
+    "gemini_model":  ("GEMINI_MODEL", "gemini-3.5-flash-lite"),
+}
+LLM_PROVIDERS = ("mistral", "claude", "gemini")
 
-# Modele effectivement utilise (pour les logs)
-if PROVIDER == "claude":
-    MODEL = CLAUDE_MODEL
-elif PROVIDER == "gemini":
-    MODEL = GEMINI_MODEL
-else:
-    MODEL = MISTRAL_MODEL
+# Reglages ecrits par l'admin web. Ils vivent dans config/, le volume
+# persistant du conteneur, et non dans .env : celui-ci est a la racine de
+# l'image, donc perdu au redeploiement, et load_dotenv() ne peut de toute
+# facon pas ecraser une variable d'environnement deja fournie par
+# docker-compose (qui en fournit toujours une, avec un defaut). Un reglage
+# enregistre dans l'admin n'atteignait donc JAMAIS le terminal, alors que
+# l'admin, lui, l'utilisait : les deux affichaient des choses differentes.
+# Ce fichier gagne donc sur l'environnement, et il est relu a CHAQUE appel :
+# un changement s'applique sans redemarrer le service, comme les
+# personnalites (cf. resolve_prompt).
+LLM_FILE = Path(__file__).parent.parent / "config" / "llm.json"
+
+
+def read_llm_file():
+    """Contenu de config/llm.json, {} s'il est absent ou illisible."""
+    try:
+        with open(LLM_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        log.warning("config/llm.json illisible (%s) : repli sur l'environnement", e)
+        return {}
+
+
+def llm_settings():
+    """Reglages effectifs du LLM : config/llm.json, sinon l'environnement,
+    sinon le defaut. Relus a chaque appel, jamais mis en cache."""
+    saved = read_llm_file()
+    s = {}
+    for name, (var, default) in _LLM_ENV.items():
+        s[name] = (str(saved.get(name) or "").strip()
+                   or os.getenv(var, "").strip()
+                   or default)
+    # GEMINI_API_KEY est accepte comme synonyme historique de GEMINI_KEY.
+    if not s["gemini_key"]:
+        s["gemini_key"] = os.getenv("GEMINI_API_KEY", "").strip()
+    s["provider"] = s["provider"].lower()
+    if s["provider"] not in LLM_PROVIDERS:
+        s["provider"] = "mistral"
+    return s
+
+
 PROMPTS_FILE = Path(__file__).parent.parent / "config" / "prompts.json"
 PROMPTS_DEFAULT = Path(__file__).parent.parent / "config" / "prompts.default.json"
 
@@ -176,14 +214,16 @@ def resolve_prompt(preset):
     return FALLBACK_PROMPT
 
 
-def call_mistral(system_prompt, history):
-    """Appelle l'API Mistral (chat completions) et retourne le texte de réponse."""
+def call_mistral(system_prompt, history, s=None):
+    """Appelle l'API Mistral (chat completions) et retourne le texte de réponse.
+    `s` : reglages deja resolus (llm_settings()), relus ici sinon."""
+    s = s or llm_settings()
     messages = [{"role": "system", "content": system_prompt}] + history
     r = requests.post(
         MISTRAL_URL,
-        headers={"Authorization": f"Bearer {MISTRAL_KEY}",
+        headers={"Authorization": f"Bearer {s['mistral_key']}",
                  "Content-Type": "application/json"},
-        json={"model": MISTRAL_MODEL, "messages": messages, "max_tokens": 700},
+        json={"model": s["mistral_model"], "messages": messages, "max_tokens": 700},
         timeout=30,
     )
     r.raise_for_status()
@@ -195,15 +235,16 @@ def call_mistral(system_prompt, history):
     return choice["message"]["content"].strip()
 
 
-def call_claude(system_prompt, history):
+def call_claude(system_prompt, history, s=None):
     """Appelle l'API Claude (Anthropic Messages) et retourne le texte de réponse.
     Le prompt systeme est passe a part (champ `system`), pas dans `messages`."""
+    s = s or llm_settings()
     r = requests.post(
         ANTHROPIC_URL,
-        headers={"x-api-key": ANTHROPIC_KEY,
+        headers={"x-api-key": s["anthropic_key"],
                  "anthropic-version": "2023-06-01",
                  "content-type": "application/json"},
-        json={"model": CLAUDE_MODEL, "max_tokens": 700,
+        json={"model": s["claude_model"], "max_tokens": 700,
               "system": system_prompt, "messages": history},
         timeout=30,
     )
@@ -221,13 +262,15 @@ def call_claude(system_prompt, history):
 _GEMINI_THINKING_PARAM = {}
 
 
-def call_gemini(system_prompt, history):
+def call_gemini(system_prompt, history, s=None):
     """Appelle l'API Gemini (generateContent) et retourne le texte de reponse.
     Le prompt systeme est passe a part (champ `systemInstruction`), pas dans
     `contents` - comme le champ `system` de Claude et le message `role: system`
     de Mistral."""
-    if not GEMINI_KEY:
+    s = s or llm_settings()
+    if not s["gemini_key"]:
         raise RuntimeError("GEMINI_KEY/GEMINI_API_KEY non configure")
+    model = s["gemini_model"]
 
     contents = []
     for item in history:
@@ -237,14 +280,15 @@ def call_gemini(system_prompt, history):
             "parts": [{"text": item.get("content", "")}],
         })
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_KEY}"
+    url = (f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
+           f":generateContent?key={s['gemini_key']}")
     config = {"maxOutputTokens": 700}
     # Les tokens de "reflexion" des modeles recents sont decomptes du plafond de
     # sortie : gemini-3.5-flash en consommait 668 sur 700 et rendait une reponse
     # coupee en plein mot. Augmenter le plafond ne suffit pas, le modele
     # reflechit d'autant plus (1893 tokens sur 2000). On la coupe donc : sur des
     # reponses de 15 lignes de 40 colonnes, elle n'apporte rien.
-    if _GEMINI_THINKING_PARAM.get(GEMINI_MODEL, True):
+    if _GEMINI_THINKING_PARAM.get(model, True):
         config["thinkingConfig"] = {"thinkingBudget": 0}
 
     body = {"contents": contents, "generationConfig": config}
@@ -256,8 +300,8 @@ def call_gemini(system_prompt, history):
         # Certains modeles (les variantes Lite) refusent ce parametre. Ils ne
         # reflechissent pas de toute facon : on retient le refus pour ne pas
         # rejouer l'aller-retour a chaque question, et on repart sans.
-        log.info("Gemini %s refuse thinkingConfig : appels suivants sans", GEMINI_MODEL)
-        _GEMINI_THINKING_PARAM[GEMINI_MODEL] = False
+        log.info("Gemini %s refuse thinkingConfig : appels suivants sans", model)
+        _GEMINI_THINKING_PARAM[model] = False
         del config["thinkingConfig"]
         r = requests.post(url, json=body, timeout=30)
     r.raise_for_status()
@@ -278,12 +322,15 @@ def call_gemini(system_prompt, history):
 
 
 def call_llm(system_prompt, history):
-    """Aiguille vers le fournisseur configure (LLM_PROVIDER)."""
-    if PROVIDER == "claude":
-        return call_claude(system_prompt, history)
-    if PROVIDER == "gemini":
-        return call_gemini(system_prompt, history)
-    return call_mistral(system_prompt, history)
+    """Aiguille vers le fournisseur configure. Les reglages sont resolus une
+    fois ici et passes tels quels : une modification en cours d'appel ne doit
+    pas envoyer la cle d'un fournisseur au modele d'un autre."""
+    s = llm_settings()
+    if s["provider"] == "claude":
+        return call_claude(system_prompt, history, s)
+    if s["provider"] == "gemini":
+        return call_gemini(system_prompt, history, s)
+    return call_mistral(system_prompt, history, s)
 
 
 # Journalisation : toujours sur la sortie standard (capturée par systemd/journald).

@@ -24,7 +24,6 @@ ASSETS_DIR = PROJ_DIR / "assets"
 PROMPTS_FILE = PROJ_DIR / "config" / "prompts.json"
 PROMPTS_DEFAULT = PROJ_DIR / "config" / "prompts.default.json"
 KNOWLEDGE_DIR = PROJ_DIR / "config" / "knowledge"
-ENV_FILE = PROJ_DIR / ".env"
 LOGS_DIR = PROJ_DIR / "logs"
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "mistral")
 SECRET_KEY = os.getenv("FLASK_SECRET", "minitel-secret-1985")
@@ -134,61 +133,47 @@ def load_knowledge_blob(key):
             break
     return "\n\n".join(parts)[:KNOWLEDGE_MAX_CHARS]
 
-# ── Helpers .env ─────────────────────────────────────────────────────────
-def read_env():
-    env = {}
-    if ENV_FILE.exists():
-        for line in ENV_FILE.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, v = line.split("=", 1)
-                env[k.strip()] = v.strip()
-    return env
-
-def write_env_key(key, value):
-    lines = ENV_FILE.read_text().splitlines() if ENV_FILE.exists() else []
-    found = False
-    for i, line in enumerate(lines):
-        if line.strip().startswith(f"{key}="):
-            lines[i] = f"{key}={value}"
-            found = True
-            break
-    if not found:
-        lines.append(f"{key}={value}")
-    ENV_FILE.write_text("\n".join(lines) + "\n")
-
-def env_or_default(name, default):
-    """Valeur d'un reglage : .env d'abord, puis variable d'environnement, puis
-    defaut. Le repli sur l'environnement est indispensable en conteneur : sans
-    volume persistant il n'y a pas de .env, et la configuration vient des
-    variables d'environnement. Sans lui, l'admin affichait toujours le modele
-    par defaut du code au lieu du modele reellement utilise."""
-    return read_env().get(name) or os.getenv(name) or default
+# ── Reglages du LLM ──────────────────────────────────────────────────────
+# Une seule source de verite, partagee avec le terminal : mg.llm_settings()
+# lit config/llm.json (volume persistant), sinon l'environnement, sinon le
+# defaut, et le fait a chaque appel. L'admin ecrivait auparavant dans .env,
+# que le terminal ne relisait jamais - ni au demarrage, load_dotenv() ne
+# pouvant ecraser les variables fournies par docker-compose, ni apres, le
+# fichier etant perdu au redeploiement.
+def write_llm_settings(updates):
+    """Enregistre des reglages dans config/llm.json, en fusionnant avec
+    l'existant. Les valeurs vides sont ignorees : laisser le champ d'une cle
+    vide dans le formulaire ne doit pas effacer la cle enregistree.
+    Ecriture atomique : le fichier est relu a chaque question du Minitel, il
+    ne doit jamais etre lu a moitie ecrit."""
+    data = mg.read_llm_file()
+    data.update({k: v for k, v in updates.items() if v})
+    mg.LLM_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = mg.LLM_FILE.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(mg.LLM_FILE)
 
 
 def mistral_key():
-    return read_env().get("MISTRAL_KEY", os.getenv("MISTRAL_KEY", ""))
+    return mg.llm_settings()["mistral_key"]
 
 def mistral_model():
-    return env_or_default("MISTRAL_MODEL", "mistral-small-latest")
+    return mg.llm_settings()["mistral_model"]
 
 def anthropic_key():
-    return read_env().get("ANTHROPIC_KEY", os.getenv("ANTHROPIC_KEY", ""))
+    return mg.llm_settings()["anthropic_key"]
 
 def claude_model():
-    return env_or_default("CLAUDE_MODEL", "claude-haiku-4-5")
+    return mg.llm_settings()["claude_model"]
 
 def gemini_key():
-    env = read_env()
-    return (env.get("GEMINI_KEY") or env.get("GEMINI_API_KEY")
-            or os.getenv("GEMINI_KEY") or os.getenv("GEMINI_API_KEY") or "")
+    return mg.llm_settings()["gemini_key"]
 
 def gemini_model():
-    return env_or_default("GEMINI_MODEL", "gemini-3.5-flash-lite")
+    return mg.llm_settings()["gemini_model"]
 
 def llm_provider():
-    p = read_env().get("LLM_PROVIDER", os.getenv("LLM_PROVIDER", "mistral")).strip().lower()
-    return p if p in ("mistral", "claude", "gemini") else "mistral"
+    return mg.llm_settings()["provider"]
 
 def mask_key(k):
     return (k[:6] + "..." + k[-4:]) if len(k) > 12 else ("(définie)" if k else "(absente)")
@@ -301,9 +286,10 @@ def generate_prompt(description):
     return r.json()["choices"][0]["message"]["content"].strip()
 
 def gemini_answer(system_prompt, user_message, max_tokens):
-    """Appelle Gemini (generateContent). L'equivalent existe dans minitel_gpt,
-    mais il lit la cle/le modele une fois au demarrage du process : ici on relit
-    le .env a chaque appel, pour que l'admin reflete tout de suite un changement.
+    """Appelle Gemini (generateContent). Double l'equivalent de minitel_gpt,
+    qui lit desormais lui aussi ses reglages a chaque appel (llm_settings) :
+    cette copie n'a plus de raison d'etre, en dehors du plafond de tokens
+    parametrable, et pourrait etre remplacee par mg.call_gemini.
     Le prompt systeme passe par le champ `systemInstruction` et la reflexion est
     coupee, comme dans minitel_gpt.call_gemini : le test de l'admin doit
     interroger le modele exactement comme le terminal, sinon il ne prouve plus
@@ -936,29 +922,26 @@ def save_llm():
     provider = request.form.get("llm_provider", "mistral").strip().lower()
     if provider not in ("mistral", "claude", "gemini"):
         provider = "mistral"
-    write_env_key("LLM_PROVIDER", provider)
+    updates = {"provider": provider}
 
-    # Clés : on n'écrase que si une nouvelle valeur est saisie.
-    mk = request.form.get("mistral_key", "").strip()
-    if mk:
-        write_env_key("MISTRAL_KEY", mk)
-    ak = request.form.get("anthropic_key", "").strip()
-    if ak:
-        write_env_key("ANTHROPIC_KEY", ak)
-    gk = request.form.get("gemini_key", "").strip()
-    if gk:
-        write_env_key("GEMINI_KEY", gk)
+    # Clés : on n'écrase que si une nouvelle valeur est saisie (write_llm_settings
+    # ignore les valeurs vides).
+    updates["mistral_key"] = request.form.get("mistral_key", "").strip()
+    updates["anthropic_key"] = request.form.get("anthropic_key", "").strip()
+    updates["gemini_key"] = request.form.get("gemini_key", "").strip()
 
     # Modèles : on ne retient qu'un identifiant connu.
     mm = request.form.get("mistral_model", "").strip()
     if mm in MISTRAL_MODEL_IDS:
-        write_env_key("MISTRAL_MODEL", mm)
+        updates["mistral_model"] = mm
     cm = request.form.get("claude_model", "").strip()
     if cm in CLAUDE_MODEL_IDS:
-        write_env_key("CLAUDE_MODEL", cm)
+        updates["claude_model"] = cm
     gm = request.form.get("gemini_model", "").strip()
     if gm in GEMINI_MODEL_IDS:
-        write_env_key("GEMINI_MODEL", gm)
+        updates["gemini_model"] = gm
+
+    write_llm_settings(updates)
 
     label = {"claude": "Claude", "gemini": "Gemini"}.get(provider, "Mistral")
     key_present = {"claude": anthropic_key, "gemini": gemini_key}.get(provider, mistral_key)
@@ -968,8 +951,8 @@ def save_llm():
         session["flash_ok"] = False
     else:
         session["flash"] = (f"Configuration enregistrée (fournisseur : {label}). "
-                            "Redéploie le service pour que le terminal Minitel en tienne compte "
-                            "(déjà pris en compte immédiatement pour le test/la génération de prompt ci-dessus).")
+                            "Prise en compte immédiate, y compris par le terminal Minitel : "
+                            "aucun redéploiement n'est nécessaire.")
         session["flash_ok"] = True
     return redirect(url_for("index"))
 

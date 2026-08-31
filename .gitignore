@@ -10,3 +10,6 @@ config/prompts.json
 .last_version
 .DS_Store
 .claude/settings.local.json
+
+# Réglages du LLM écrits par l'admin (clés API) : volume, jamais le dépôt.
+config/llm.json

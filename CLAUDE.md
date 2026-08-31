@@ -95,11 +95,25 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   (systemd + git) ont été retirés de l'interface (inutilisables en conteneur,
   cf. `git log` sur `admin_ui.py`) ; les mises à jour se font par redéploiement
   du serveur. Les personnalités/prompts se rechargent à chaud à chaque retour au
-  sommaire (pas de redémarrage nécessaire) ; en revanche la clé/le provider LLM
-  du terminal sont lus une seule fois au démarrage du process — un changement
-  via l'admin (`/save-llm`) n'est pris en compte par le vrai terminal Minitel
-  qu'après un redéploiement (déjà pris en compte immédiatement pour le
-  test/la génération de prompt dans l'admin, qui relit `.env` à chaque appel).
+  sommaire, et depuis `/save-llm` le fournisseur, le modèle et les clés aussi :
+  pas de redémarrage nécessaire.
+- **Réglages du LLM : `config/llm.json`, pas `.env`** (piège corrigé, à ne pas
+  refaire). `/save-llm` écrivait dans `.env`, et le terminal ne voyait JAMAIS le
+  changement, pour deux raisons cumulées : `.env` est à la racine de l'image
+  (`/app/.env`), donc perdu au redéploiement puisque seul `/app/config` est un
+  volume ; et `load_dotenv()` n'écrase pas une variable déjà présente dans
+  l'environnement, or `docker-compose.yml` en fournit toujours une, avec un
+  défaut (`LLM_PROVIDER=${LLM_PROVIDER:-mistral}`) ou vide pour les clés.
+  L'admin, lui, relisait `.env` à chaque appel : son test de personnalité
+  utilisait donc un modèle que le Minitel n'utilisait pas, sans le moindre
+  avertissement, et le message de confirmation affirmait faussement qu'un
+  redéploiement suffirait. Désormais `mg.llm_settings()` est la seule source :
+  `config/llm.json` (volume, gitignoré, écrit atomiquement par l'admin) >
+  variable d'environnement > défaut du code, relu à **chaque** appel LLM.
+  Corollaire à connaître : une valeur enregistrée dans l'admin gagne
+  définitivement sur les variables d'environnement du serveur ; pour revenir à
+  celles-ci, il faut retirer la clé du JSON (pas d'action dans l'UI), comme
+  pour le champ `prompt` des personnalités.
 - **Le modèle replie ses lignes malgré la consigne** : le prompt lui interdit
   d'insérer des retours à la ligne (`MINITEL_MARKUP_HELP`, et deux tentatives de
   reformulation : `e247ced`, `cc2bb3e`), il le fait quand même, autour de 40
@@ -164,6 +178,9 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
 `ANTHROPIC_KEY`, `CLAUDE_MODEL`, `GEMINI_KEY`, `GEMINI_MODEL`,
 `ADMIN_PASSWORD`, `FLASK_SECRET`, `ADMIN_PUBLIC_URL`, `WS_TOKEN`.
 
+Tout ce qui concerne le LLM (fournisseur, clés, modèles) peut aussi venir de
+`config/llm.json`, écrit par l'admin web, qui a la priorité sur ces variables.
+
 ## Statut actuel
 
 - [x] Refactor transport + `server.py` validé (import + session simulée + stack
@@ -188,6 +205,11 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
       l'URL, donc dans l'historique Safari du téléphone.
 
 ## Prochaines pistes possibles
+
+- Dédupliquer `llm_answer()` / `gemini_answer()` (`admin_ui.py`) : ils
+  recopiaient les appels HTTP de `minitel_gpt` parce que celui-ci lisait sa
+  configuration une seule fois au démarrage. Ce n'est plus le cas
+  (`llm_settings()`), `mg.call_llm()` suffirait, au plafond de tokens près.
 
 - Reconnexion / gestion de plusieurs Minitels simultanés côté serveur.
 - Durcir le wss côté ESP32 (empreinte du certificat).
