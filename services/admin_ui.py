@@ -16,6 +16,7 @@ from werkzeug.utils import secure_filename
 
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
+import minitel_gpt as mg
 from minitel_gpt import strip_markdown, MARKUP_INSTRUCTIONS
 
 PROJ_DIR = Path(__file__).parent.parent
@@ -296,21 +297,31 @@ def gemini_answer(system_prompt, user_message, max_tokens):
     """Appelle Gemini (generateContent). L'equivalent existe dans minitel_gpt,
     mais il lit la cle/le modele une fois au demarrage du process : ici on relit
     le .env a chaque appel, pour que l'admin reflete tout de suite un changement.
-    Gemini n'a pas de champ "system" : le prompt systeme est passe en premier
-    tour de parole, comme dans minitel_gpt.call_gemini."""
+    Le prompt systeme passe par le champ `systemInstruction` et la reflexion est
+    coupee, comme dans minitel_gpt.call_gemini : le test de l'admin doit
+    interroger le modele exactement comme le terminal, sinon il ne prouve plus
+    rien. Sans thinkingBudget, gemini-3.5-flash brulait 284 des 300 tokens en
+    reflexion et l'admin affichait une reponse coupee que le terminal n'a pas.
+    Le dictionnaire de decouverte est partage : admin et terminal tournent dans
+    le meme processus, un refus 400 constate d'un cote sert a l'autre."""
     import requests
     key = gemini_key()
     if not key:
         raise RuntimeError("Clé Gemini absente")
-    contents = []
+    model = gemini_model()
+    config = {"maxOutputTokens": max_tokens}
+    if mg._GEMINI_THINKING_PARAM.get(model, True):
+        config["thinkingConfig"] = {"thinkingBudget": 0}
+    body = {"contents": [{"role": "user", "parts": [{"text": user_message}]}],
+            "generationConfig": config}
     if system_prompt:
-        contents.append({"role": "user", "parts": [{"text": f"[System]\n{system_prompt}"}]})
-    contents.append({"role": "user", "parts": [{"text": user_message}]})
-    r = requests.post(
-        f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model()}:generateContent?key={key}",
-        json={"contents": contents, "generationConfig": {"maxOutputTokens": max_tokens}},
-        timeout=45,
-    )
+        body["systemInstruction"] = {"parts": [{"text": system_prompt}]}
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
+    r = requests.post(url, json=body, timeout=45)
+    if r.status_code == 400 and "thinkingConfig" in config:
+        mg._GEMINI_THINKING_PARAM[model] = False
+        del config["thinkingConfig"]
+        r = requests.post(url, json=body, timeout=45)
     r.raise_for_status()
     parts = []
     for candidate in r.json().get("candidates", []):

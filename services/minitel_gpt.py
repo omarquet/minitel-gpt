@@ -194,16 +194,14 @@ _GEMINI_THINKING_PARAM = {}
 
 
 def call_gemini(system_prompt, history):
-    """Appelle l'API Gemini (generateContent) et retourne le texte de reponse."""
+    """Appelle l'API Gemini (generateContent) et retourne le texte de reponse.
+    Le prompt systeme est passe a part (champ `systemInstruction`), pas dans
+    `contents` - comme le champ `system` de Claude et le message `role: system`
+    de Mistral."""
     if not GEMINI_KEY:
         raise RuntimeError("GEMINI_KEY/GEMINI_API_KEY non configure")
 
     contents = []
-    if system_prompt:
-        contents.append({
-            "role": "user",
-            "parts": [{"text": f"[System]\n{system_prompt}"}],
-        })
     for item in history:
         role = "user" if item.get("role") == "user" else "model"
         contents.append({
@@ -221,7 +219,11 @@ def call_gemini(system_prompt, history):
     if _GEMINI_THINKING_PARAM.get(GEMINI_MODEL, True):
         config["thinkingConfig"] = {"thinkingBudget": 0}
 
-    r = requests.post(url, json={"contents": contents, "generationConfig": config}, timeout=30)
+    body = {"contents": contents, "generationConfig": config}
+    if system_prompt:
+        body["systemInstruction"] = {"parts": [{"text": system_prompt}]}
+
+    r = requests.post(url, json=body, timeout=30)
     if r.status_code == 400 and "thinkingConfig" in config:
         # Certains modeles (les variantes Lite) refusent ce parametre. Ils ne
         # reflechissent pas de toute facon : on retient le refus pour ne pas
@@ -229,7 +231,7 @@ def call_gemini(system_prompt, history):
         log.info("Gemini %s refuse thinkingConfig : appels suivants sans", GEMINI_MODEL)
         _GEMINI_THINKING_PARAM[GEMINI_MODEL] = False
         del config["thinkingConfig"]
-        r = requests.post(url, json={"contents": contents, "generationConfig": config}, timeout=30)
+        r = requests.post(url, json=body, timeout=30)
     r.raise_for_status()
 
     data = r.json()
