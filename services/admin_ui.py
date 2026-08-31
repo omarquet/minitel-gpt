@@ -488,7 +488,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     <div class=toolbar>
       <select id=presetSel onchange=loadPreset()>
         {% for k,p in presets.items() %}
-        <option value="{{k}}" {{'selected' if k==active_key}}>{{p.label}}{{' (active)' if k==active_key else ''}}</option>
+        <option value="{{k}}" {{'selected' if k==edit_key}}>{{p.label}}{{' (active)' if k==active_key else ''}}</option>
         {% endfor %}
       </select>
       <button class="btn btn-s" type=button onclick=newPreset() style=margin:0>+ Nouveau</button>
@@ -756,8 +756,16 @@ def index():
     data = load_prompts()
     presets = normalized_presets(data)
     flash = session.pop("flash", None); flash_ok = session.pop("flash_ok", False)
+    # Personnalite ouverte dans l'editeur. Sans ce parametre, toute action
+    # (enregistrer, ajouter ou supprimer un fichier de connaissance) ramenait
+    # le selecteur sur la personnalite ACTIVE : on perdait celle qu'on etait en
+    # train d'editer, et il fallait la reselectionner a chaque fois.
+    edit_key = request.args.get("preset", "")
+    if edit_key not in presets:
+        edit_key = data["active"]
     return render_template_string(
         ADMIN_HTML, presets=presets, presets_json=json.dumps(presets),
+        edit_key=edit_key,
         knowledge_json=json.dumps(all_knowledge()),
         logo_fonts=LOGO_FONTS, logo_max_cols=LOGO_MAX_COLS,
         logo_max_lines=LOGO_MAX_LINES,
@@ -816,7 +824,7 @@ def save_prompt():
     session["flash"] = (f"Personnalité '{p['label']}' enregistrée."
                         + (f" Logo ajusté : {avert}." if avert else ""))
     session["flash_ok"] = not avert
-    return redirect(url_for("index"))
+    return redirect(url_for("index", preset=k))
 
 @app.route("/apply-preset", methods=["POST"])
 @require_login
@@ -837,7 +845,7 @@ def apply_preset():
         save_prompts(data)
         session["flash"] = f"Personnalité '{p.get('label', k)}' activée."
         session["flash_ok"] = True
-    return redirect(url_for("index"))
+    return redirect(url_for("index", preset=k))
 
 @app.route("/new-preset", methods=["POST"])
 @require_login
@@ -856,7 +864,7 @@ def new_preset():
         save_prompts(data)
         session["flash"] = f"Personnalité '{label}' créée. Éditez-la puis Activez-la."
         session["flash_ok"] = True
-    return redirect(url_for("index"))
+    return redirect(url_for("index", preset=key))
 
 @app.route("/delete-preset", methods=["POST"])
 @require_login
@@ -987,20 +995,26 @@ def upload_knowledge():
         n += 1
     session["flash"] = f"{n} fichier(s) ajouté(s) à « {data['presets'][key].get('label', key)} »." if n else "Aucun fichier .txt valide."
     session["flash_ok"] = bool(n)
-    return redirect(url_for("index"))
+    return redirect(url_for("index", preset=key))
 
 @app.route("/delete-knowledge", methods=["POST"])
 @require_login
 def delete_knowledge():
     key = request.form.get("preset_key", "").strip()
-    fn = secure_filename(request.form.get("filename", "").strip())
-    target = KNOWLEDGE_DIR / key / fn
-    if fn and target.is_file():
-        target.unlink()
+    fn = request.form.get("filename", "").strip()
+    # On ne fait pas confiance au nom recu, mais on ne le reecrit pas non plus :
+    # secure_filename() retire les accents et remplace les espaces, si bien
+    # qu'un fichier depose a la main dans le volume et nomme "societe.txt" avec
+    # un accent, ou "mes notes.txt", etait bien liste par list_knowledge() mais
+    # introuvable a la suppression. On exige donc une correspondance exacte avec
+    # ce que la page affichait - ce qui interdit aussi toute traversee de
+    # repertoire, le nom devant figurer dans le dossier du preset.
+    if key in load_prompts()["presets"] and fn in list_knowledge(key):
+        (KNOWLEDGE_DIR / key / fn).unlink()
         session["flash"] = f"Fichier {fn} supprimé."; session["flash_ok"] = True
     else:
         session["flash"] = "Fichier introuvable."; session["flash_ok"] = False
-    return redirect(url_for("index"))
+    return redirect(url_for("index", preset=key))
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080, debug=False)
