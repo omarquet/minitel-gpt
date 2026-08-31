@@ -335,13 +335,60 @@ MINITEL_MARKUP_TAGS = {
 MINITEL_MARKUP_RESET = FG_WHITE + SZ_NORMAL
 _MINITEL_MARKUP_RE = re.compile(r"\{(/|[a-z]+)\}")
 
+# Un {grand} laisse ouvert divise par deux la largeur utile : 2 colonnes par
+# caractere, donc ~19 caracteres par ligne au lieu de 39. Le texte part alors
+# en lignes de trois mots, illisible (constate en production : une reponse
+# entiere passee en double taille). Le prompt demande de s'en servir pour
+# quelques mots et de toujours refermer, mais on ne peut pas plus compter
+# sur un modele ici qu'on ne compte sur lui pour ne pas produire de Markdown
+# (cf. strip_markdown). On borne donc le passage a une ligne d'ecran.
+MARKUP_DOUBLE_MAX_COLS = COLS // 2 - 1        # 19 caracteres visibles
+# Portee d'un {grand} : jusqu'a son {/}, un autre {grand}, ou la fin du texte.
+_MARKUP_DOUBLE_RE = re.compile(r"\{grand\}(.*?)(?=\{/\}|\{grand\}|$)", re.S)
+
+
+def bound_double_size(text, max_cols=MARKUP_DOUBLE_MAX_COLS):
+    """Referme un {grand} dont le passage depasse une ligne d'ecran.
+
+    Le texte n'est jamais modifie : seule la mise en forme est coupee, en
+    inserant un {/} au dernier espace avant la limite (a defaut, pile sur la
+    limite). Les autres balises du passage ne comptent pas comme du texte
+    visible et sont laissees en place."""
+    def repl(m):
+        span = m.group(1)
+        # Position dans `span` de chaque caractere visible, tags exclus.
+        pos, i = [], 0
+        while i < len(span):
+            tag = _MINITEL_MARKUP_RE.match(span, i)
+            if tag:
+                i = tag.end()
+                continue
+            pos.append(i)
+            i += 1
+        if len(pos) <= max_cols:
+            return m.group(0)
+        cut = pos[max_cols]
+        # cut+1 : si la limite tombe pile sur une espace, on coupe dessus
+        # plutot que sur la precedente, ce qui sacrifiait un mot entier.
+        espace = span.rfind(" ", 0, cut + 1)
+        if espace > 0:
+            cut = espace
+        return "{grand}" + span[:cut] + "{/}" + span[cut:]
+    return _MARKUP_DOUBLE_RE.sub(repl, text)
+
+
 MARKUP_INSTRUCTIONS = (
     "\n\nMise en forme disponible (a utiliser avec parcimonie, pour "
     "souligner un mot ou une phrase clef, jamais pour tout le texte) : "
     "{rouge}...{/}, {vert}...{/}, {jaune}...{/}, {bleu}...{/}, "
-    "{magenta}...{/}, {cyan}...{/}, {blanc}...{/} pour changer la couleur, "
-    "{grand}...{/} pour un texte en double hauteur/largeur. "
+    "{magenta}...{/}, {cyan}...{/}, {blanc}...{/} pour changer la couleur. "
     "Toujours refermer avec {/}. N'utilise RIEN d'autre comme mise en forme."
+    "\n\nIl existe aussi {grand}...{/} (double hauteur et largeur), mais il "
+    "coute cher : en double taille il ne tient plus que 20 caracteres par "
+    "ligne au lieu de 40, et une phrase entiere en {grand} devient un texte "
+    "hache en lignes de trois mots, illisible. Reserve-le donc a UN mot, "
+    "trois au maximum, jamais plus d'une ligne, et referme-le "
+    "immediatement. En cas de doute, utilise une couleur plutot que {grand}."
     "\n\nDessins ASCII : UNIQUEMENT si on te demande explicitement un dessin, "
     "un logo ou un schema, encadre-le par {art} et {/art}, chacun seul sur sa "
     "ligne. Les lignes entre les deux sont affichees telles quelles, espaces "
@@ -365,7 +412,7 @@ def apply_minitel_markup(text):
             return MINITEL_MARKUP_RESET.decode("latin1")
         code = MINITEL_MARKUP_TAGS.get(tag)
         return code.decode("latin1") if code else ""
-    return _MINITEL_MARKUP_RE.sub(repl, text)
+    return _MINITEL_MARKUP_RE.sub(repl, bound_double_size(text))
 
 # Touches de fonction Minitel (SEP + code)
 K_ENVOI=0x41; K_RETOUR=0x42; K_REPET=0x43; K_GUIDE=0x44
