@@ -93,13 +93,21 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   `WS_TOKEN` est configuré côté serveur, `/ws`, `/ws-echo` et `/ws-gemini`
   exigent `?token=...` en query string (sinon connexion refusée en silence).
   L'ESP32 doit inclure le même token dans `WS_PATH` (voir le `.ino`).
-- **Prompt système éditable en fichier texte** : un preset de
-  `prompts.default.json` peut avoir `"system_file": "nom.txt"` (fichier dans
-  `config/prompts/`) au lieu d'un `"system"` échappé sur une seule ligne.
-  `ensure_prompts()` (`minitel_gpt.py`) résout la référence une seule
-  fois, au premier boot, en copiant le contenu du fichier dans le
-  `prompts.json` du volume — qui redevient ensuite un JSON autonome, éditable
-  normalement depuis l'admin web (le `system_file` n'est plus relu après).
+- **Prompt système en deux couches** : un preset peut avoir
+  `"prompt_file": "nom.txt"` (fichier dans `config/prompts/`) au lieu d'un
+  `"prompt"` échappé sur une seule ligne. `resolve_prompt()`
+  (`minitel_gpt.py`) tranche **à chaque lecture** : le champ `prompt` s'il est
+  renseigné (personnalisation écrite par l'admin web), sinon le contenu du
+  `.txt` (défaut du dépôt). Le défaut reste donc vivant - modifier le `.txt` et
+  redéployer suffit tant que l'admin n'a rien saisi - et `ensure_prompts()` ne
+  copie plus le texte dans `prompts.json`, pour qu'une installation neuve se
+  comporte comme une installation existante. Attention au piège qui a motivé
+  ce changement : `p.get("prompt", FALLBACK_PROMPT)` ne protégeait rien, la clé
+  existant avec la valeur `""` dans `prompts.default.json`, le LLM recevait un
+  prompt vide sans le moindre avertissement. L'admin, lui, n'écrit le champ que
+  s'il est non vide : enregistrer la personnalité sans toucher au prompt ne
+  fige donc pas le défaut. En revanche, une fois personnalisé, le retour au
+  défaut demande de vider le champ dans `prompts.json` (pas d'action dans l'UI).
 
 ## Variables d'environnement (serveur)
 

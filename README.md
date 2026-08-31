@@ -120,9 +120,10 @@ serveur.
 `https://<ton-domaine>/` - mot de passe défini par `ADMIN_PASSWORD`.
 
 - **Personnalités** : créer / modifier / supprimer des presets, prompt système
-  en éditeur multi-lignes, génération de prompt par IA, **fichiers de
-  connaissance** (.txt) injectés dans le contexte, textes d'accueil
-  personnalisables, zone de test sans le Minitel.
+  en éditeur multi-lignes (laissé vide, le défaut du dépôt s'applique - voir
+  plus bas), génération de prompt par IA, **fichiers de connaissance** (.txt)
+  injectés dans le contexte, textes d'accueil personnalisables, zone de test
+  sans le Minitel.
 - **Paramètres** : choix du **fournisseur d'IA** (Mistral, Claude) avec la clé
   et le modèle de chacun, logs. (Gemini se configure uniquement par variable
   d'environnement pour l'instant, pas encore dans ce formulaire.)
@@ -131,6 +132,19 @@ Les personnalités sont stockées dans `config/prompts.json` (créé au premier
 démarrage depuis `config/prompts.default.json`, non versionné), leurs fichiers
 de connaissance dans `config/knowledge/<personnalité>/` - tout ça vit dans le
 volume Docker persistant, pas dans le dépôt git.
+
+Le prompt système se lit en **deux couches** :
+
+1. le champ `prompt` de `config/prompts.json`, s'il est renseigné - c'est la
+   personnalisation écrite depuis l'admin web ;
+2. sinon le fichier texte désigné par `prompt_file`, dans `config/prompts/` -
+   c'est le défaut fourni par le dépôt.
+
+Le défaut reste donc **vivant** : tant que personne n'a rien saisi dans l'admin,
+modifier le `.txt` du dépôt et redéployer suffit à changer la personnalité. Un
+`.txt` est bien plus lisible qu'une chaîne JSON échappée sur une seule ligne.
+L'admin affiche sous le champ lequel des deux est utilisé ; un champ vide n'est
+pas un prompt vide.
 
 > Les personnalités/prompts sont pris en compte immédiatement (relus à chaque
 > conversation). En revanche, changer la clé/le fournisseur LLM dans
@@ -163,6 +177,7 @@ services/
   admin_ui.py           interface web d'admin
 config/
   prompts.default.json  personnalités par défaut (prompts.json créé au 1er boot)
+  prompts/*.txt         prompts système par défaut, référencés par `prompt_file`
 firmware/
   firmware.ino          pont UART <-> WebSocket (sketch Arduino)
   secrets.h.example     modèle de secrets.h (WiFi + token WS, non versionné)

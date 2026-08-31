@@ -129,23 +129,49 @@ def ensure_prompts():
     """prompts.json est local (gitignoré) : si absent (1er lancement / après une
     mise à jour), on le crée depuis prompts.default.json fourni par le dépôt.
 
-    Un preset peut référencer son prompt via "prompt_file" (nom de fichier
-    dans config/prompts/) plutôt qu'une chaîne JSON échappée sur une seule
-    ligne - plus simple à éditer/relire. Résolu une seule fois ici, à la
-    création : prompts.json reste ensuite un JSON autonome, éditable
-    normalement depuis l'admin web (le champ "prompt" est alors la source)."""
+    Le "prompt_file" des presets n'est PAS resolu ici : le copier dans
+    prompts.json figerait le defaut du depot en override des la creation, et
+    une installation neuve ne se comporterait pas comme une installation
+    existante. La resolution se fait a chaque lecture, dans resolve_prompt()."""
     if PROMPTS_FILE.exists() or not PROMPTS_DEFAULT.exists():
         return
-    data = json.loads(PROMPTS_DEFAULT.read_text(encoding="utf-8"))
-    for preset in data.get("presets", {}).values():
-        prompt_file = preset.get("prompt_file")
-        if not prompt_file:
-            continue
-        f = PROMPTS_TEXT_DIR / prompt_file
-        if f.exists():
-            preset["prompt"] = f.read_text(encoding="utf-8").strip()
-    PROMPTS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+    PROMPTS_FILE.write_text(PROMPTS_DEFAULT.read_text(encoding="utf-8"),
                             encoding="utf-8")
+
+
+def default_prompt_file(preset):
+    """Chemin du fichier texte de prompt par defaut d'un preset, s'il existe."""
+    name = (preset.get("prompt_file") or "").strip()
+    if not name or "/" in name or "\\" in name:
+        return None
+    f = PROMPTS_TEXT_DIR / name
+    return f if f.is_file() else None
+
+
+def resolve_prompt(preset):
+    """Prompt systeme effectif d'un preset, en deux couches :
+
+    1. le champ "prompt" de prompts.json, s'il est renseigne - c'est l'override
+       ecrit par l'admin web ;
+    2. sinon le fichier texte designe par "prompt_file" (dans config/prompts/),
+       qui est le defaut fourni par le depot.
+
+    Le defaut reste donc vivant : tant que l'admin n'a rien saisi, modifier le
+    .txt et redeployer suffit a changer la personnalite. Vider le champ dans
+    prompts.json ramene au defaut.
+
+    Un `.get("prompt", FALLBACK_PROMPT)` ne suffisait pas : la cle existe avec
+    la valeur "" dans prompts.default.json, donc le defaut de .get() ne partait
+    jamais et le LLM recevait un prompt vide, sans le moindre avertissement."""
+    override = (preset.get("prompt") or "").strip()
+    if override:
+        return override
+    f = default_prompt_file(preset)
+    if f:
+        return f.read_text(encoding="utf-8").strip()
+    log.warning("Preset sans prompt ni prompt_file exploitable : "
+                "repli sur FALLBACK_PROMPT")
+    return FALLBACK_PROMPT
 
 
 def call_mistral(system_prompt, history):
@@ -388,7 +414,7 @@ def load_preset():
         data = json.load(open(PROMPTS_FILE))
         key = data["active"]
         p = data["presets"][key]
-        prompt = p.get("prompt", FALLBACK_PROMPT)
+        prompt = resolve_prompt(p)
         knowledge = load_knowledge(key)
         if knowledge:
             prompt += ("\n\nCONNAISSANCES DE REFERENCE (utilise ces informations "

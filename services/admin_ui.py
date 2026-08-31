@@ -93,6 +93,13 @@ def normalized_presets(data):
         merged.update(p)
         merged.setdefault("prompt", "")
         merged.setdefault("label", k)
+        # Provenance du prompt effectif : tant que "prompt" est vide, le
+        # terminal lit le .txt du depot (mg.resolve_prompt). On expose le nom et
+        # la taille du fichier, pas son contenu : l'editeur doit pouvoir dire
+        # "defaut utilise" sans alourdir la page de plusieurs ko par preset.
+        f = mg.default_prompt_file(merged)
+        merged["prompt_default_file"] = f.name if f else ""
+        merged["prompt_default_len"] = len(f.read_text(encoding="utf-8").strip()) if f else 0
         out[k] = merged
     return out
 
@@ -519,6 +526,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 
       <label>Prompt système (consignes de l'IA)</label>
       <textarea name=prompt id=fsystem rows=12></textarea>
+      <p class=sub id=fsystemsrc style="margin:6px 0 0"></p>
       <hr>
       <button class="btn btn-p">💾 Enregistrer</button>
       <button class="btn btn-s" formaction=/apply-preset>✓ Activer</button>
@@ -651,6 +659,21 @@ function loadPreset(){
   const k=document.getElementById('presetSel').value, p=PRESETS[k]; if(!p)return;
   fkey.value=k; flabel.value=p.label||''; ftitle.value=p.title_msg||'';
   fquestion.value=p.question_msg||''; floading.value=p.loading_msg||''; fsystem.value=p.prompt||'';
+  // Champ vide = aucun override : le terminal lit le .txt du depot. On le dit,
+  // sinon un champ vide se lit comme "pas de prompt du tout".
+  const src=document.getElementById('fsystemsrc');
+  if((p.prompt||'').trim()){
+    src.textContent=p.prompt_default_file
+      ? 'Personnalisé : ce texte remplace le défaut du dépôt ('
+        + p.prompt_default_file + ').'
+      : 'Personnalisé.';
+  } else if(p.prompt_default_file){
+    src.textContent='Champ vide : le défaut du dépôt est utilisé ('
+      + p.prompt_default_file + ', ' + p.prompt_default_len
+      + ' caractères). Écrire ici crée une personnalisation.';
+  } else {
+    src.textContent='Aucun prompt défini et aucun fichier par défaut : le terminal utilisera un prompt générique.';
+  }
   flogotext.value=p.logo_text||''; flogoart.value=p.logo_art||'';
   flogofont.value=p.logo_font||'small';
   document.getElementById('activeInfo').textContent=
@@ -874,8 +897,12 @@ def test_preset_route():
     data = load_prompts()
     if key not in data["presets"]:
         return jsonify(ok=False, error="Personnalité inconnue")
-    # Prompt : la version en cours d'édition si fournie, sinon l'enregistrée.
-    prompt_text = (j.get("prompt") or "").strip() or data["presets"][key].get("prompt", "")
+    # Prompt : la version en cours d'édition si fournie, sinon le prompt
+    # effectif du preset - override enregistre, ou defaut du depot. Sans ce
+    # repli, tester un preset non personnalise interrogeait le modele avec un
+    # prompt vide, alors que le terminal, lui, lit le .txt.
+    prompt_text = ((j.get("prompt") or "").strip()
+                   or mg.resolve_prompt(data["presets"][key]))
     kb = load_knowledge_blob(key)
     if kb:
         prompt_text += ("\n\nCONNAISSANCES DE REFERENCE (utilise ces informations "
