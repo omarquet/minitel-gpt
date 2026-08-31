@@ -76,17 +76,23 @@
        l'ecran et 4px de marge : cale pile sur la largeur, un arrondi
        sous-pixel suffirait a faire replier chaque ligne par le navigateur. */
     --cell: calc((100cqw - 28px) / 24);
+    /* Interligne serre : un vrai Minitel est en 4:3, donc une case 1.25 fois
+       plus haute que large. Courier New avance de 0.6em par caractere, si bien
+       qu'a 40 colonnes pleines l'ecran penche forcement vers le portrait. 1.05
+       est le plus proche atteignable sans que les jambages (p, g, q) touchent
+       la rangee suivante ; le vrai 4:3 demanderait 0.67. */
+    --lh: 1.05;
     font-size: var(--cell);
     /* Hauteur fixe (25 lignes) : un vrai Minitel a un ecran de taille physique
        constante, quel que soit le texte affiche (contrairement a min-height,
        qui grandissait avec les lignes en {grand}/double hauteur). Suit la
        police, sinon changer l'une sans l'autre deforme l'ecran. */
-    height: calc(12px * 2 + 25 * var(--cell) * 1.25);
+    height: calc(12px * 2 + 25 * var(--cell) * var(--lh));
     /* `pre` et non `pre-wrap` : la grille fait exactement 40 colonnes par
        rangee, un vrai Minitel ne replie jamais une ligne. En cas de police
        trop grande, on prefere une troncature (overflow:hidden) a un
        repliement qui casserait toute la mise en page. */
-    white-space: pre; line-height: 1.25;
+    white-space: pre; line-height: var(--lh);
     box-shadow: inset 0 0 40px rgba(0,0,0,.6);
   }
   .screen::after {
