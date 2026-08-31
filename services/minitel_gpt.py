@@ -109,7 +109,9 @@ ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 
 # Gemini - idem, HTTP brut.
 GEMINI_KEY = os.getenv("GEMINI_KEY") or os.getenv("GEMINI_API_KEY") or ""
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+# Defaut aligne sur celui de l'admin (admin_ui.gemini_model) : le
+# precedent, gemini-2.0-flash, a ete retire par Google et repond 404.
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
 # Modele effectivement utilise (pour les logs)
 if PROVIDER == "claude":

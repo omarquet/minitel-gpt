@@ -13,13 +13,20 @@ usage.
 1. Nouvelle app/service à partir de ton fork, en Docker Compose (ou Dockerfile).
 2. Environment :
    - `LLM_PROVIDER=mistral` (ou `claude` / `gemini`)
-   - `MISTRAL_KEY=...`  `MISTRAL_MODEL=mistral-small-latest`
-   - `GEMINI_KEY=...`  `GEMINI_MODEL=gemini-2.0-flash` (si `LLM_PROVIDER=gemini`)
+   - `MISTRAL_KEY=...`  `MISTRAL_MODEL=mistral-small-latest` (si `LLM_PROVIDER=mistral`)
+   - `ANTHROPIC_KEY=...`  `CLAUDE_MODEL=claude-haiku-4-5` (si `LLM_PROVIDER=claude`)
+   - `GEMINI_KEY=...`  `GEMINI_MODEL=gemini-3.5-flash-lite` (si `LLM_PROVIDER=gemini`)
    - `ADMIN_PASSWORD=...`  `FLASK_SECRET=...`
    - `ADMIN_PUBLIC_URL=https://minitel.tondomaine.fr`
    - `WS_TOKEN=...` (recommandé) : sans ça, `/ws` est ouvert à qui connaît
      l'URL et peut consommer ta clé API. Avec un token, l'ESP32 et tes tests
      doivent ajouter `?token=...` à l'URL WebSocket.
+
+   Les clés et modèles des trois fournisseurs cohabitent : basculer de l'un à
+   l'autre ne fait pas perdre la configuration des autres. Les identifiants de
+   modèles vieillissent vite - Google a retiré `gemini-2.0-flash`, qui répond
+   maintenant `404 no longer available`. La liste à jour est celle des
+   sélecteurs de l'admin (onglet **Paramètres**).
 3. Domaine `minitel.tondomaine.fr`, port exposé **8080** (le reverse proxy gère TLS + WebSocket).
    ⚠️ Vérifie aussi le **port du healthcheck** dans la config de ton serveur : il
    revient parfois à une valeur par défaut (ex. 3000) qui ne correspond pas au
