@@ -723,6 +723,65 @@ def read_question(t):
             buf.append(chr(c))       # pas d'écho (le Minitel l'affiche)
 
 
+def paginate_lines(lines, rows=CONTENT_ROWS, min_last=3, slack=5):
+    """Decoupe des lignes deja mises en forme en pages d'au plus `rows` lignes.
+
+    Un simple decoupage par tranches fixes produisait deux defauts visibles :
+    une derniere page ne portant qu'une ligne (19 lignes -> 18 + 1), et des
+    pages commencant par une ligne vide, qui se lisent comme un ecran casse.
+
+    Une ligne vide qui tombe sur une coupure ne porte aucune information : on
+    la mange. On casse donc de preference sur une fin de paragraphe proche de
+    la limite (`slack` lignes avant), et si la page suivante recevrait moins de
+    `min_last` lignes on recule pour lui donner de la matiere."""
+    # Une serie de lignes vides gaspille des rangees sur un ecran de 24 : on la
+    # ramene a une seule, et on retire celles de la fin.
+    compact = []
+    for ln in lines:
+        if not ln.strip() and (not compact or not compact[-1].strip()):
+            continue
+        compact.append(ln)
+    while compact and not compact[-1].strip():
+        compact.pop()
+    lines = compact
+
+    def fin_de_paragraphe(depuis, jusqu_a):
+        """Index de la derniere ligne vide dans [jusqu_a, depuis], ou None."""
+        for i in range(min(depuis, len(lines) - 1), max(jusqu_a, 0) - 1, -1):
+            if not lines[i].strip():
+                return i
+        return None
+
+    def reste_utile(cut):
+        """Lignes que recevrait vraiment la page suivante : celles du debut
+        seront mangees au tour d'apres, les compter laissait passer des
+        dernieres pages a deux lignes."""
+        i = cut
+        while i < len(lines) and not lines[i].strip():
+            i += 1
+        return len(lines) - i
+
+    pages = []
+    while lines:
+        if not lines[0].strip():        # jamais de ligne vide en haut de page
+            lines.pop(0)
+            continue
+        if len(lines) <= rows:
+            pages.append(lines)
+            break
+        # `or` sans risque : lines[0] n'est jamais vide a ce stade, donc
+        # fin_de_paragraphe ne peut pas renvoyer l'index 0.
+        cut = fin_de_paragraphe(rows, rows - slack) or rows
+        # A defaut de fin de paragraphe utilisable, on recule d'une ligne a la
+        # fois : un paragraphe monolithique plus long qu'une page vaut mieux
+        # equilibre (19 lignes -> 16 + 3) qu'en orphelin (18 + 1).
+        while 0 < reste_utile(cut) < min_last and cut > rows // 2:
+            cut = fin_de_paragraphe(cut - 1, rows // 2) or (cut - 1)
+        pages.append(lines[:cut])
+        lines = lines[cut:]
+    return pages or [[""]]
+
+
 def show_response(t, text: str, start_at_last=False):
     """Affiche la réponse en pages. RETOUR revient sur une page precedente
     (autant de fois que necessaire), SUITE avance, SOMMAIRE abandonne.
@@ -735,7 +794,7 @@ def show_response(t, text: str, start_at_last=False):
     normal qui rend la main directement (SUITE y vaut alors "terminer la
     revision")."""
     lines = wrap(text)
-    pages = [lines[i:i+CONTENT_ROWS] for i in range(0, len(lines), CONTENT_ROWS)] or [[""]]
+    pages = paginate_lines(lines)
     pidx = max(0, len(pages) - 2) if start_at_last else 0
     while True:
         t.clear()
