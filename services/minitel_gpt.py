@@ -609,6 +609,55 @@ def visible_truncate(s, width, start_width=1):
     return "".join(out)
 
 
+# Malgre la consigne (voir MINITEL_MARKUP_HELP), le modele replie encore
+# parfois ses phrases lui-meme, autour de 40 caracteres. wrap() traitant
+# chaque "\n" comme une fin de paragraphe, le mot qui depassait se retrouve
+# seul sur une ligne ("...Marie-Antoinette y" / "y" / "fut enfermee..."). On
+# recolle donc d'abord les lignes qui sont manifestement un repli subi, sans
+# toucher a une mise en page voulue (titre, enumeration, ligne "Adresse : ...",
+# ligne vide, bloc {art}).
+SOFT_WRAP_MIN_COLS = 30            # en deca, la ligne est courte volontairement
+_LIST_ITEM_RE = re.compile(r"^\s*(?:[-*]|\d+[.)])\s")
+_LABEL_RE = re.compile(r"^[A-Za-z][^:]{0,20}\s:\s")
+_SENTENCE_END = ".!?:;"
+_DOUBLE_SIZE_BYTES = {b for b, w in _COLUMN_WIDTH_BY_SIZE_BYTE.items() if w == 2}
+
+
+def _has_double_size(s):
+    """Vrai si la ligne passe en double largeur ({grand}) : c'est un titre,
+    jamais la queue d'une phrase repliee."""
+    return any(s[i] == chr(ESC) and i + 1 < len(s) and ord(s[i + 1]) in _DOUBLE_SIZE_BYTES
+               for i in range(len(s) - 1))
+
+
+def _is_soft_wrap(line, nxt):
+    """`nxt` est-elle la suite de `line`, repliee par le modele ?"""
+    if not line.strip() or not nxt.strip():
+        return False                            # ligne vide : separation voulue
+    if line.startswith(ART_MARK) or nxt.startswith(ART_MARK):
+        return False                            # dessin recopie tel quel
+    if _has_double_size(line) or _has_double_size(nxt):
+        return False                            # titre en {grand}
+    if _LIST_ITEM_RE.match(line) or _LIST_ITEM_RE.match(nxt):
+        return False                            # enumeration : un item par ligne
+    if _LABEL_RE.match(nxt) or nxt.strip().isupper():
+        return False                            # "Adresse : ...", titre en capitales
+    if line.rstrip()[-1] in _SENTENCE_END:
+        return False                            # phrase finie : coupure assumee
+    # Une ligne courte a ete coupee volontairement ; une ligne pleine est un repli.
+    return visible_len(line) >= SOFT_WRAP_MIN_COLS
+
+
+def join_soft_wraps(lines):
+    out = []
+    for line in lines:
+        if out and _is_soft_wrap(out[-1], line):
+            out[-1] = out[-1].rstrip() + " " + line.lstrip()
+        else:
+            out.append(line)
+    return out
+
+
 def wrap(text, width=COLS):
     # Une ligne qui remplit exactement les 40 colonnes fait DEJA passer le
     # curseur du Minitel a la rangee suivante (debordement automatique en fin
@@ -623,7 +672,7 @@ def wrap(text, width=COLS):
     # compter double sur les lignes suivantes, sinon on sous-estime leur
     # largeur reelle et le texte deborde des 40 colonnes a l'affichage.
     col_width = 1
-    for para in text.split("\n"):
+    for para in join_soft_wraps(text.split("\n")):
         # Ligne de dessin ({art}) : recopiee telle quelle, espaces d'alignement
         # compris. Seule concession, la troncature a la largeur de l'ecran.
         # Un dessin est toujours en taille normale : on remet col_width a 1.
