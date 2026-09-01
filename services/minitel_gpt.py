@@ -552,8 +552,12 @@ KNOWLEDGE_HEADER = (
     "\n\nCONNAISSANCES DE REFERENCE. Ces documents font autorite sur les sujets "
     "qu'ils traitent : quand la question porte dessus, reponds a partir d'eux "
     "plutot que de tes souvenirs. Pour toute autre question, ignore-les "
-    "completement et reponds normalement - n'y ramene jamais la conversation, "
-    "et ne suppose pas qu'une question generale les concerne.\n")
+    "completement et reponds normalement - n'y ramene jamais la conversation. "
+    "Une question generale (\"qui est le president ?\", \"quelle est la "
+    "capitale ?\") porte sur le monde, PAS sur ces documents : n'y cherche la "
+    "reponse que si la question nomme leur sujet. Tu n'es pas l'auteur de ces "
+    "documents et tu ne parles pas en son nom : dis \"ils\" ou le nom, jamais "
+    "\"nous\".\n")
 
 
 def with_knowledge(prompt, knowledge):
