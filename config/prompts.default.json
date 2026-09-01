@@ -25,6 +25,14 @@
       "title_msg": "*** GUIDE DE PARIS ***",
       "question_msg": "Que voulez-vous visiter ?",
       "loading_msg": "Je consulte le guide..."
+    },
+    "mistral": {
+      "label": "Mistral",
+      "prompt_file": "mistral.txt",
+      "prompt": "",
+      "title_msg": "*** MISTRAL ***",
+      "question_msg": "Posez votre question :",
+      "loading_msg": "Consultation en cours..."
     }
   }
 }
