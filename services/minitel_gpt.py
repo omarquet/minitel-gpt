@@ -252,17 +252,21 @@ def resolve_prompt(preset):
     return FALLBACK_PROMPT
 
 
-def call_mistral(system_prompt, history, s=None):
+def call_mistral(system_prompt, history, s=None, max_tokens=700, timeout=30):
     """Appelle l'API Mistral (chat completions) et retourne le texte de réponse.
     `s` : reglages deja resolus (llm_settings()), relus ici sinon."""
     s = s or llm_settings()
-    messages = [{"role": "system", "content": system_prompt}] + history
+    if not s["mistral_key"]:
+        raise RuntimeError("Cle Mistral absente (MISTRAL_KEY)")
+    # Pas de message systeme vide : l'admin genere un prompt sans consigne
+    # systeme, et un role "system" a "" n'apporte rien a l'API.
+    messages = ([{"role": "system", "content": system_prompt}] if system_prompt else []) + history
     r = requests.post(
         MISTRAL_URL,
         headers={"Authorization": f"Bearer {s['mistral_key']}",
                  "Content-Type": "application/json"},
-        json={"model": s["mistral_model"], "messages": messages, "max_tokens": 700},
-        timeout=30,
+        json={"model": s["mistral_model"], "messages": messages, "max_tokens": max_tokens},
+        timeout=timeout,
     )
     r.raise_for_status()
     choice = r.json()["choices"][0]
@@ -273,18 +277,22 @@ def call_mistral(system_prompt, history, s=None):
     return choice["message"]["content"].strip()
 
 
-def call_claude(system_prompt, history, s=None):
+def call_claude(system_prompt, history, s=None, max_tokens=700, timeout=30):
     """Appelle l'API Claude (Anthropic Messages) et retourne le texte de réponse.
     Le prompt systeme est passe a part (champ `system`), pas dans `messages`."""
     s = s or llm_settings()
+    if not s["anthropic_key"]:
+        raise RuntimeError("Cle Claude absente (ANTHROPIC_KEY)")
+    body = {"model": s["claude_model"], "max_tokens": max_tokens, "messages": history}
+    if system_prompt:
+        body["system"] = system_prompt
     r = requests.post(
         ANTHROPIC_URL,
         headers={"x-api-key": s["anthropic_key"],
                  "anthropic-version": "2023-06-01",
                  "content-type": "application/json"},
-        json={"model": s["claude_model"], "max_tokens": 700,
-              "system": system_prompt, "messages": history},
-        timeout=30,
+        json=body,
+        timeout=timeout,
     )
     r.raise_for_status()
     data = r.json()
@@ -300,14 +308,14 @@ def call_claude(system_prompt, history, s=None):
 _GEMINI_THINKING_PARAM = {}
 
 
-def call_gemini(system_prompt, history, s=None):
+def call_gemini(system_prompt, history, s=None, max_tokens=700, timeout=30):
     """Appelle l'API Gemini (generateContent) et retourne le texte de reponse.
     Le prompt systeme est passe a part (champ `systemInstruction`), pas dans
     `contents` - comme le champ `system` de Claude et le message `role: system`
     de Mistral."""
     s = s or llm_settings()
     if not s["gemini_key"]:
-        raise RuntimeError("GEMINI_KEY/GEMINI_API_KEY non configure")
+        raise RuntimeError("Cle Gemini absente (GEMINI_KEY/GEMINI_API_KEY)")
     model = s["gemini_model"]
 
     contents = []
@@ -320,7 +328,7 @@ def call_gemini(system_prompt, history, s=None):
 
     url = (f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
            f":generateContent?key={s['gemini_key']}")
-    config = {"maxOutputTokens": 700}
+    config = {"maxOutputTokens": max_tokens}
     # Les tokens de "reflexion" des modeles recents sont decomptes du plafond de
     # sortie : gemini-3.5-flash en consommait 668 sur 700 et rendait une reponse
     # coupee en plein mot. Augmenter le plafond ne suffit pas, le modele
@@ -333,7 +341,7 @@ def call_gemini(system_prompt, history, s=None):
     if system_prompt:
         body["systemInstruction"] = {"parts": [{"text": system_prompt}]}
 
-    r = requests.post(url, json=body, timeout=30)
+    r = requests.post(url, json=body, timeout=timeout)
     if r.status_code == 400 and "thinkingConfig" in config:
         # Certains modeles (les variantes Lite) refusent ce parametre. Ils ne
         # reflechissent pas de toute facon : on retient le refus pour ne pas
@@ -341,7 +349,7 @@ def call_gemini(system_prompt, history, s=None):
         log.info("Gemini %s refuse thinkingConfig : appels suivants sans", model)
         _GEMINI_THINKING_PARAM[model] = False
         del config["thinkingConfig"]
-        r = requests.post(url, json=body, timeout=30)
+        r = requests.post(url, json=body, timeout=timeout)
     r.raise_for_status()
 
     data = r.json()
@@ -359,16 +367,20 @@ def call_gemini(system_prompt, history, s=None):
     raise RuntimeError(f"Reponse Gemini non exploitable: {data}")
 
 
-def call_llm(system_prompt, history):
+def call_llm(system_prompt, history, max_tokens=700, timeout=30):
     """Aiguille vers le fournisseur configure. Les reglages sont resolus une
     fois ici et passes tels quels : une modification en cours d'appel ne doit
-    pas envoyer la cle d'un fournisseur au modele d'un autre."""
+    pas envoyer la cle d'un fournisseur au modele d'un autre.
+
+    max_tokens / timeout : le terminal repond court et vite, l'admin genere des
+    prompts plus longs et peut attendre - d'ou les valeurs par defaut du
+    terminal, surchargeables."""
     s = llm_settings()
     if s["provider"] == "claude":
-        return call_claude(system_prompt, history, s)
+        return call_claude(system_prompt, history, s, max_tokens, timeout)
     if s["provider"] == "gemini":
-        return call_gemini(system_prompt, history, s)
-    return call_mistral(system_prompt, history, s)
+        return call_gemini(system_prompt, history, s, max_tokens, timeout)
+    return call_mistral(system_prompt, history, s, max_tokens, timeout)
 
 
 # Journalisation : toujours sur la sortie standard (capturée par systemd/journald).
@@ -584,7 +596,14 @@ def fixed_date_note(preset, key=None):
     s'il n'a pas de fixed_year. Prend le preset en argument plutot que de
     relire la personnalite active : l'admin teste une personnalite qui n'est
     pas forcement celle du Minitel."""
-    fixed_year = (preset or {}).get("fixed_year") or FALLBACK_FIXED_YEARS.get(key)
+    preset = preset or {}
+    # Le champ, DES QU'IL EST PRESENT, fait autorite - y compris a null, 0 ou ""
+    # pour dire "pas de date figee". Sans cette distinction, le repli ci-dessous
+    # renvoyait 1989 pour les deux identifiants historiques quoi qu'on ecrive
+    # dans prompts.json : la personnalite etait bloquee dans son epoque, sans
+    # aucun moyen de l'en sortir (l'admin n'expose pas ce champ).
+    fixed_year = preset["fixed_year"] if "fixed_year" in preset \
+        else FALLBACK_FIXED_YEARS.get(key)
     if not fixed_year:
         return ""
     now = datetime.now()

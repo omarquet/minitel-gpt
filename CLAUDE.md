@@ -161,7 +161,11 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   qui relisait la personnalité **active** et n'était pas appelé par l'admin :
   une question sur la date n'y donnait pas la même réponse que sur le Minitel.
   Le conteneur doit avoir son fuseau (`TZ=Europe/Paris` + `tzdata`), sinon il
-  tourne en UTC et la date est fausse entre minuit et 2 h.
+  tourne en UTC et la date est fausse entre minuit et 2 h. Le champ, **dès
+  qu'il est présent**, fait autorité, y compris à `null` pour dire « pas de
+  date figée » : sinon `FALLBACK_FIXED_YEARS` (les identifiants historiques
+  `annees80` et `annees80bis`) rendait ces personnalités impossibles à libérer
+  de 1989, l'admin n'exposant pas ce champ.
 - **`%MODEL` dans les messages d'écran** : les trois messages d'un preset
   (`title_msg`, `question_msg`, `loading_msg`) passent par `expand_vars()`
   (`minitel_gpt.py`), qui remplace `%model` (insensible à la casse) par le
@@ -257,10 +261,8 @@ Tout ce qui concerne le LLM (fournisseur, clés, modèles) peut aussi venir de
 
 ## Prochaines pistes possibles
 
-- Dédupliquer `llm_answer()` / `gemini_answer()` (`admin_ui.py`) : ils
-  recopiaient les appels HTTP de `minitel_gpt` parce que celui-ci lisait sa
-  configuration une seule fois au démarrage. Ce n'est plus le cas
-  (`llm_settings()`), `mg.call_llm()` suffirait, au plafond de tokens près.
+- Exposer `fixed_year` dans l'éditeur de personnalité (aujourd'hui, seul le
+  JSON permet de le régler ou de le neutraliser).
 
 - Reconnexion / gestion de plusieurs Minitels simultanés côté serveur.
 - Durcir le wss côté ESP32 (empreinte du certificat).

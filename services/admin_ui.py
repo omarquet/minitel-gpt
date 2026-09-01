@@ -239,7 +239,6 @@ def log_tail(name, n=40):
 
 # ── Génération de prompt par IA ──────────────────────────────────────────
 def generate_prompt(description):
-    import requests
     meta = (
         "Tu es expert en conception de prompts systeme pour un chatbot affiche "
         "sur un terminal Minitel (40 colonnes, ASCII sans accents ni emojis).\n\n"
@@ -254,112 +253,24 @@ def generate_prompt(description):
         "Reponds UNIQUEMENT avec le texte du prompt systeme, sans preambule.\n\n"
         f"DESCRIPTION DU PROJET :\n{description}"
     )
-    if llm_provider() == "gemini":
-        return gemini_answer("", meta, 1500)
-    if llm_provider() == "claude":
-        key = anthropic_key()
-        if not key:
-            raise RuntimeError("Clé Claude absente")
-        r = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={"x-api-key": key, "anthropic-version": "2023-06-01",
-                     "content-type": "application/json"},
-            json={"model": claude_model(), "max_tokens": 1500,
-                  "messages": [{"role": "user", "content": meta}]},
-            timeout=45,
-        )
-        r.raise_for_status()
-        blocks = r.json().get("content", [])
-        return "".join(b.get("text", "") for b in blocks
-                       if b.get("type") == "text").strip()
-    # Mistral (défaut)
-    key = mistral_key()
-    if not key:
-        raise RuntimeError("Clé Mistral absente")
-    r = requests.post(
-        "https://api.mistral.ai/v1/chat/completions",
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-        json={"model": mistral_model(), "max_tokens": 1500,
-              "messages": [{"role": "user", "content": meta}]},
-        timeout=45,
-    )
-    r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"].strip()
-
-def gemini_answer(system_prompt, user_message, max_tokens):
-    """Appelle Gemini (generateContent). Double l'equivalent de minitel_gpt,
-    qui lit desormais lui aussi ses reglages a chaque appel (llm_settings) :
-    cette copie n'a plus de raison d'etre, en dehors du plafond de tokens
-    parametrable, et pourrait etre remplacee par mg.call_gemini.
-    Le prompt systeme passe par le champ `systemInstruction` et la reflexion est
-    coupee, comme dans minitel_gpt.call_gemini : le test de l'admin doit
-    interroger le modele exactement comme le terminal, sinon il ne prouve plus
-    rien. Sans thinkingBudget, gemini-3.5-flash brulait 284 des 300 tokens en
-    reflexion et l'admin affichait une reponse coupee que le terminal n'a pas.
-    Le dictionnaire de decouverte est partage : admin et terminal tournent dans
-    le meme processus, un refus 400 constate d'un cote sert a l'autre."""
-    import requests
-    key = gemini_key()
-    if not key:
-        raise RuntimeError("Clé Gemini absente")
-    model = gemini_model()
-    config = {"maxOutputTokens": max_tokens}
-    if mg._GEMINI_THINKING_PARAM.get(model, True):
-        config["thinkingConfig"] = {"thinkingBudget": 0}
-    body = {"contents": [{"role": "user", "parts": [{"text": user_message}]}],
-            "generationConfig": config}
-    if system_prompt:
-        body["systemInstruction"] = {"parts": [{"text": system_prompt}]}
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
-    r = requests.post(url, json=body, timeout=45)
-    if r.status_code == 400 and "thinkingConfig" in config:
-        mg._GEMINI_THINKING_PARAM[model] = False
-        del config["thinkingConfig"]
-        r = requests.post(url, json=body, timeout=45)
-    r.raise_for_status()
-    parts = []
-    for candidate in r.json().get("candidates", []):
-        for part in candidate.get("content", {}).get("parts", []):
-            if isinstance(part, dict) and part.get("text"):
-                parts.append(part["text"])
-    return "".join(parts).strip()
+    # Le meta-prompt tient lieu de question : pas de consigne systeme.
+    return llm_answer("", meta, max_tokens=1500)
 
 
-def llm_answer(system_prompt, user_message):
-    """Interroge le LLM configuré comme le ferait le terminal (system + question).
-    Retourne le texte de la réponse."""
-    import requests
-    history = [{"role": "user", "content": user_message}]
-    if llm_provider() == "gemini":
-        return gemini_answer(system_prompt, user_message, 700)
-    if llm_provider() == "claude":
-        key = anthropic_key()
-        if not key:
-            raise RuntimeError("Clé Claude absente")
-        r = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={"x-api-key": key, "anthropic-version": "2023-06-01",
-                     "content-type": "application/json"},
-            json={"model": claude_model(), "max_tokens": 700,
-                  "system": system_prompt, "messages": history},
-            timeout=45,
-        )
-        r.raise_for_status()
-        blocks = r.json().get("content", [])
-        return "".join(b.get("text", "") for b in blocks
-                       if b.get("type") == "text").strip()
-    key = mistral_key()
-    if not key:
-        raise RuntimeError("Clé Mistral absente")
-    messages = [{"role": "system", "content": system_prompt}] + history
-    r = requests.post(
-        "https://api.mistral.ai/v1/chat/completions",
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-        json={"model": mistral_model(), "messages": messages, "max_tokens": 700},
-        timeout=45,
-    )
-    r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"].strip()
+def llm_answer(system_prompt, user_message, max_tokens=700):
+    """Interroge le LLM configure EXACTEMENT comme le terminal, en appelant la
+    meme fonction que lui (mg.call_llm) : cle, modele, prompt systeme passe a
+    part, reflexion Gemini coupee, plafonds. L'admin recopiait auparavant ces
+    trois appels HTTP, parce que minitel_gpt lisait sa configuration une seule
+    fois au demarrage - ce n'est plus le cas (llm_settings). Deux
+    implementations d'une meme chose finissent toujours par diverger, et ici
+    c'est l'outil de diagnostic qui se serait mis a mentir.
+
+    Le delai est plus large que celui du terminal : l'admin genere des prompts
+    de 1500 tokens et peut attendre, la ou un Minitel doit rendre la main."""
+    return mg.call_llm(system_prompt, [{"role": "user", "content": user_message}],
+                       max_tokens=max_tokens, timeout=45)
+
 
 # ── Templates ────────────────────────────────────────────────────────────
 LOGIN_HTML = """<!DOCTYPE html><html lang=fr><head><meta charset=UTF-8>
