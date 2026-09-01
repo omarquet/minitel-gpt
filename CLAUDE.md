@@ -152,6 +152,14 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   rangées sur 24. Les deux routes de l'admin qui enregistrent le formulaire
   (`/save-prompt` ET `/apply-preset`) doivent traiter tout nouveau champ :
   n'en traiter qu'une perdrait la saisie en silence à l'activation.
+- **`fixed_year` et la date du jour** : un LLM ignore la date. Si le preset
+  actif a un `fixed_year`, `with_fixed_date()` (`server.py`) ajoute au prompt
+  « Nous sommes aujourd'hui le 1er septembre 1989 » : jour et mois **réels**,
+  année figée. Deux limites à connaître. Le conteneur doit avoir son fuseau
+  (`TZ=Europe/Paris` + `tzdata`), sinon il tourne en UTC et la date est fausse
+  entre minuit et 2 h. Et le test de personnalité de l'admin ne passe PAS par
+  cette fonction (il appelle `llm_answer`, pas `run_session`) : une question
+  sur la date n'y donne donc pas la même réponse que sur le Minitel.
 - **`%MODEL` dans les messages d'écran** : les trois messages d'un preset
   (`title_msg`, `question_msg`, `loading_msg`) passent par `expand_vars()`
   (`minitel_gpt.py`), qui remplace `%model` (insensible à la casse) par le
@@ -204,8 +212,14 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   existant avec la valeur `""` dans `prompts.default.json`, le LLM recevait un
   prompt vide sans le moindre avertissement. L'admin, lui, n'écrit le champ que
   s'il est non vide : enregistrer la personnalité sans toucher au prompt ne
-  fige donc pas le défaut. En revanche, une fois personnalisé, le retour au
-  défaut demande de vider le champ dans `prompts.json` (pas d'action dans l'UI).
+  fige donc pas le défaut. Pour revenir au défaut une fois personnalisé, vider
+  le champ ne suffit pas (une valeur vide est ignorée, justement pour ne pas
+  effacer une personnalisation par accident) : il faut cocher « Revenir au
+  prompt par défaut du dépôt » dans l'éditeur, qui écrit `""` dans `prompt`.
+  Sans cette case, la seule issue était d'éditer `prompts.json` dans le volume,
+  et un prompt oublié là faisait dire n'importe quoi au terminal - c'est
+  comme ça qu'un « Assistant général » s'est retrouvé figé au 31 décembre 1989,
+  alors que ni son `.txt` ni `fixed_year` ne le prévoyaient.
 
 ## Variables d'environnement (serveur)
 

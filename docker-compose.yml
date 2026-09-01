@@ -16,6 +16,8 @@ services:
       - FLASK_SECRET=${FLASK_SECRET:-change-me}
       # URL publique affichee sur le Minitel via la touche GUIDE
       - ADMIN_PUBLIC_URL=${ADMIN_PUBLIC_URL}
+      # Fuseau horaire : date du jour injectee dans le prompt et horodatage des logs
+      - TZ=${TZ:-Europe/Paris}
       # Jeton requis en ?token=... pour se connecter aux endpoints WebSocket
       # (/ws, /ws-echo, /ws-gemini). Vide = pas de verification.
       - WS_TOKEN=${WS_TOKEN}

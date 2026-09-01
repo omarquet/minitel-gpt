@@ -171,6 +171,11 @@ def gemini_model():
 def llm_provider():
     return mg.llm_settings()["provider"]
 
+def default_prompt_name(preset):
+    f = mg.default_prompt_file(preset)
+    return f.name if f else "prompt générique"
+
+
 def mask_key(k):
     return (k[:6] + "..." + k[-4:]) if len(k) > 12 else ("(définie)" if k else "(absente)")
 
@@ -515,6 +520,10 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
       <label>Prompt système (consignes de l'IA)</label>
       <textarea name=prompt id=fsystem rows=12></textarea>
       <p class=sub id=fsystemsrc style="margin:6px 0 0"></p>
+      <label id=fresetwrap style="font-weight:normal;display:block;margin-top:8px">
+        <input type=checkbox name=reset_prompt id=fresetprompt onchange=toggleReset()>
+        Revenir au prompt par défaut du dépôt (vide la personnalisation)
+      </label>
       <hr>
       <button class="btn btn-p">💾 Enregistrer</button>
       <button class="btn btn-s" formaction=/apply-preset>✓ Activer</button>
@@ -643,6 +652,12 @@ document.querySelectorAll('nav.tabs button').forEach(b=>{
     document.querySelectorAll('.panel').forEach(x=>x.classList.toggle('active',x.id===t));
   }})();
 // Editeur
+function toggleReset(){
+  // Griser le champ rend l'effet visible : ce qui y est ecrit ne sera pas garde.
+  fsystem.disabled=fresetprompt.checked;
+  fsystem.style.opacity=fresetprompt.checked?.5:1;
+}
+
 function loadPreset(){
   const k=document.getElementById('presetSel').value, p=PRESETS[k]; if(!p)return;
   fkey.value=k; flabel.value=p.label||''; ftitle.value=p.title_msg||'';
@@ -663,6 +678,10 @@ function loadPreset(){
   } else {
     src.textContent='Aucun prompt défini et aucun fichier par défaut : le terminal utilisera un prompt générique.';
   }
+  // La case ne sert que s'il y a un defaut a retrouver, et ne doit jamais
+  // rester cochee en passant d'une personnalite a l'autre.
+  fresetprompt.checked=false; toggleReset();
+  document.getElementById('fresetwrap').hidden=!p.prompt_default_file;
   flogotext.value=p.logo_text||''; flogoart.value=p.logo_art||'';
   flogofont.value=p.logo_font||'small';
   document.getElementById('activeInfo').textContent=
@@ -807,11 +826,22 @@ def save_prompt():
     p["question_msg"] = to_minitel_ascii(request.form.get("question_msg", DEFAULTS["question_msg"]))[:40]
     p["loading_msg"] = to_minitel_ascii(request.form.get("loading_msg", DEFAULTS["loading_msg"]))[:40]
     avert = save_logo_fields(p)
-    sp = request.form.get("prompt", "").strip()
-    if sp:
-        p["prompt"] = sp
+    # Vider le champ ne suffisait pas a revenir au defaut : on n'ecrit que les
+    # valeurs non vides, pour qu'un formulaire renvoye sans le prompt n'efface
+    # pas la personnalisation. La case a cocher est donc le seul moyen de dire
+    # "efface", et redonne la main au .txt du depot (cf. resolve_prompt).
+    revenu_au_defaut = bool(request.form.get("reset_prompt"))
+    if revenu_au_defaut:
+        p["prompt"] = ""
+    else:
+        sp = request.form.get("prompt", "").strip()
+        if sp:
+            p["prompt"] = sp
     save_prompts(data)
+    defaut = default_prompt_name(p)
     session["flash"] = (f"Personnalité '{p['label']}' enregistrée."
+                        + (f" Prompt : retour au défaut du dépôt ({defaut})."
+                           if revenu_au_defaut else "")
                         + (f" Logo ajusté : {avert}." if avert else ""))
     session["flash_ok"] = not avert
     return redirect(url_for("index", preset=k))
@@ -830,7 +860,9 @@ def apply_preset():
             p["question_msg"] = to_minitel_ascii(request.form.get("question_msg", DEFAULTS["question_msg"]))[:40]
             p["loading_msg"] = to_minitel_ascii(request.form.get("loading_msg", DEFAULTS["loading_msg"]))[:40]
             save_logo_fields(p)
-            if request.form.get("prompt", "").strip():
+            if request.form.get("reset_prompt"):
+                p["prompt"] = ""
+            elif request.form.get("prompt", "").strip():
                 p["prompt"] = request.form.get("prompt").strip()
         data["active"] = k
         save_prompts(data)

@@ -131,7 +131,10 @@ def with_fixed_date(system_prompt):
     if not fixed_year:
         return system_prompt
     now = datetime.now()
-    date_str = f"{now.day} {MOIS_FR[now.month - 1]} {fixed_year}"
+    # "le 1 septembre" n'existe pas en francais, et le modele recopie ce qu'il
+    # lit : le premier du mois s'ecrit "1er".
+    jour = "1er" if now.day == 1 else str(now.day)
+    date_str = f"{jour} {MOIS_FR[now.month - 1]} {fixed_year}"
     return system_prompt + f"\n\n[Information systeme] Nous sommes aujourd'hui le {date_str}."
 
 

@@ -3,8 +3,13 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # curl : requis par le healthcheck du serveur (GET /healthz depuis l'intérieur du conteneur)
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
+# tzdata : sans lui, TZ est ignoré et le conteneur reste en UTC. La date du jour
+# injectée dans le prompt (with_fixed_date) et l'horodatage des logs seraient
+# alors en retard d'une à deux heures sur Paris, donc faux entre minuit et 2 h.
+RUN apt-get update && apt-get install -y --no-install-recommends curl tzdata \
     && rm -rf /var/lib/apt/lists/*
+
+ENV TZ=Europe/Paris
 
 # admin_ui.py (fichier d'origine, pensé pour un Pi avec systemd) appelle
 # `systemctl`/`sudo` sans filet : absents en conteneur, ça fait planter
