@@ -50,7 +50,7 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   Relais brut. Le C3 n'a pas d'UART2 et ses GPIO11-17 sont pris par la flash :
   les GPIO16/17 du projet d'origine sont inutilisables. Identifiants WiFi et
   token WS dans `firmware/secrets.h` (ignoré par git, modèle `secrets.h.example`).
-- `minitel-test.html` — émulateur Minitel navigateur qui parle le MÊME
+- `minitel.html` — émulateur Minitel navigateur qui parle le MÊME
   protocole WebSocket binaire que l'ESP32 (rendu Videotex 40 col, touches SEP),
   URL et token WS configurables dans l'interface. Sert à tester SANS matériel.
 - `dictee.html` — page servie sur `/dictee` (et `/dictee.html`), pensée pour Safari iOS :

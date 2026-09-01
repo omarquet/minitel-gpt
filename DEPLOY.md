@@ -42,7 +42,7 @@ En local :
 ```bash
 docker compose up --build
 ```
-Ouvre `minitel-test.html`, URL `ws://localhost:8080/ws`, clique **Connecter**.
+Ouvre `minitel.html`, URL `ws://localhost:8080/ws`, clique **Connecter**.
 Tape une question, **Entrée** = ENVOI ; boutons SUITE / SOMMAIRE / GUIDE.
 
 Une fois déployé sur ton serveur, pointe l'émulateur sur `wss://minitel.tondomaine.fr/ws`

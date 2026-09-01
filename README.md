@@ -41,7 +41,7 @@ Variables d'environnement principales (`.env.example` à la racine) :
 
 ## Tester sans matériel
 
-Ouvre `https://<ton-domaine>/minitel-test.html` : un émulateur Minitel dans le
+Ouvre `https://<ton-domaine>/minitel.html` : un émulateur Minitel dans le
 navigateur qui parle le même protocole WebSocket binaire que l'ESP32 (rendu
 Vidéotex 40 colonnes, boutons pour les touches de fonction). L'URL WebSocket
 et le jeton (`WS_TOKEN`) sont saisissables dans l'interface.
@@ -181,7 +181,7 @@ config/
 firmware/
   firmware.ino          pont UART <-> WebSocket (sketch Arduino)
   secrets.h.example     modèle de secrets.h (WiFi + token WS, non versionné)
-minitel-test.html        émulateur Minitel dans le navigateur (test sans matériel)
+minitel.html             émulateur Minitel dans le navigateur (test sans matériel)
 Dockerfile, docker-compose.yml, entrypoint.sh
 DEPLOY.md                procédure de déploiement
 ```
@@ -193,7 +193,7 @@ DEPLOY.md                procédure de déploiement
 | Symptôme | Cause probable |
 |---|---|
 | 502 Bad Gateway sur toutes les routes | conteneur pas démarré/joignable - vérifie les logs du serveur et le port du healthcheck (doit être celui de `EXPOSE` dans le Dockerfile, pas un défaut générique) |
-| `minitel-test.html` ne se connecte pas | mauvais protocole (`wss://` pas `ws://` derrière le reverse proxy/HTTPS), `WS_TOKEN` manquant dans l'URL si configuré côté serveur, ou pas de port dans l'URL publique (le reverse proxy route en 443 en interne vers le port du conteneur) |
+| `minitel.html` ne se connecte pas | mauvais protocole (`wss://` pas `ws://` derrière le reverse proxy/HTTPS), `WS_TOKEN` manquant dans l'URL si configuré côté serveur, ou pas de port dans l'URL publique (le reverse proxy route en 443 en interne vers le port du conteneur) |
 | Erreur API (401/403) sur les réponses | clé du fournisseur actif (`LLM_PROVIDER`) absente ou invalide |
 | Rien ne s'affiche sur le vrai Minitel | câblage DIN délogé, level shifter absent/mal branché, broche 4 pontée par erreur, ou brochage DIN mal identifié (l'ordre physique n'est pas 1-2-3-4-5, voir plus haut) |
 | Charabia à l'écran | vitesse ESP32 ≠ vitesse Minitel (rester à 1200 bauds 7E1 des deux côtés) |

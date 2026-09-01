@@ -300,7 +300,7 @@ async function status() {
     if (r.status === 403) { forget(); return; }
     const j = await r.json();
     if (!j.sessions) {
-      setBanner(false, "Aucun Minitel connecté. Branchez l'ESP32 (ou ouvrez minitel-test.html), puis patientez.");
+      setBanner(false, "Aucun Minitel connecté. Branchez l'ESP32 (ou ouvrez minitel.html), puis patientez.");
       return;
     }
     let msg = j.ready ? 'Minitel prêt (en attente de saisie).' : 'Minitel occupé (réponse à l’écran).';

@@ -15,7 +15,7 @@ Fait tourner, dans UN SEUL processus Flask :
 Cote materiel : un ESP32 relie au Minitel (DIN5, UART 1200 7E1) se connecte a
 wss://<domaine>/ws et fait un pont transparent octet-a-octet entre l'UART du
 Minitel et la WebSocket. Le meme protocole (frames binaires, octets bruts) est
-parlable depuis un navigateur (voir minitel-test.html), ce qui permet de
+parlable depuis un navigateur (voir minitel.html), ce qui permet de
 tester la chaine complete SANS ESP32.
 """
 import os
@@ -502,7 +502,7 @@ def _printable(text):
 
 
 @app.route("/dictee")
-@app.route("/dictee.html")          # alias : minitel-test.html garde son extension
+@app.route("/dictee.html")          # alias : minitel.html garde son extension
 def dictee_page():
     """Page de dictee pour telephone.
 
@@ -560,9 +560,9 @@ def healthz():
     return "ok", 200
 
 
-@app.route("/minitel-test.html")
+@app.route("/minitel.html")
 def minitel_test():
-    html_path = Path(__file__).resolve().parent.parent / "minitel-test.html"
+    html_path = Path(__file__).resolve().parent.parent / "minitel.html"
     return send_file(html_path, mimetype="text/html")
 
 
