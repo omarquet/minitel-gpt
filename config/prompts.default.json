@@ -34,7 +34,9 @@
       "prompt": "",
       "title_msg": "*** POWERED BY MISTRAL ***",
       "question_msg": "Alors collegue, ta question ?",
-      "loading_msg": "Attends un peu, je reflechis..."
+      "loading_msg": "Attends un peu, je reflechis...",
+      "logo_text": "3615 MISTRAL",
+      "logo_font": "small"
     }
   }
 }
