@@ -168,7 +168,14 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   aujourd'hui le mardi 1er septembre 2026 » : jour de la semaine, jour et mois
   **réels**, année réelle - sauf si le preset a un `fixed_year`, qui remplace
   la seule année (« vendredi 1er septembre 1989 », le jour de la semaine étant
-  recalculé pour l'année effective). Elle prend le preset en argument et est appelée par
+  recalculé pour l'année effective). Pour un preset **non figé**, la note ajoute
+  une consigne indispensable : « tes connaissances s'arrêtent avant cette date,
+  réponds avec ce que tu sais... ne refuse jamais au seul motif que la date est
+  récente ». Sans elle, donner la date réelle se retourne contre nous - le
+  modèle en déduit que tout a pu changer depuis son entraînement et se dérobe
+  (« le président dépend des résultats des élections en cours »). Un preset
+  figé, lui, DOIT refuser au-delà de son année : il ne reçoit pas cette
+  consigne. Elle prend le preset en argument et est appelée par
   `load_preset()`, donc le terminal et le test de l'admin obtiennent la même
   chose - ce n'était pas le cas de l'ancien `with_fixed_date()` de `server.py`,
   qui relisait la personnalité **active** et n'était pas appelé par l'admin :
