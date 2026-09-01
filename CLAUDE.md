@@ -43,7 +43,10 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   Sert enfin la dictée depuis un téléphone : `/dictee` (la page), `/dictee/status`
   et `/dictee/inject`, adossés au registre `SESSIONS` des sessions ouvertes.
 - `Dockerfile` + `entrypoint.sh` + `requirements.txt` — image Python 3.11,
-  lancée par gunicorn (`-k gthread`). L'entrypoint amorce le volume config.
+  lancée par gunicorn (`-k gthread`). L'entrypoint amorce le volume config, et
+  y **remet à jour à chaque démarrage** les fichiers de référence du dépôt
+  (`prompts.default.json`, `prompts/*.txt`) sans jamais toucher aux données
+  (`prompts.json`, `knowledge/`, `llm.json`).
 - `docker-compose.yml` — pour le serveur, volume `minitel-config` persistant.
 - `firmware/firmware.ino` — firmware ESP32-C3 : UART1 (GPIO4 RX / GPIO5 TX) en
   `SERIAL_7E1` (1200 bauds) <-> WebSocket client (lib WebSockets de Links2004).
@@ -127,6 +130,20 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   moins de `SOFT_WRAP_MIN_COLS` colonnes a été coupée volontairement, une ligne
   pleine est un repli. Sans le garde-fou sur les labels, deux lignes
   « Horaires : ... » / « Tarif : ... » sans point final fusionnaient.
+- **Volume : données contre fichiers de référence** (piège corrigé, il a coûté
+  deux allers-retours). `entrypoint.sh` amorçait tout le volume en `cp -rn`
+  (no-clobber), y compris `prompts.default.json` et `prompts/*.txt`, qui sont
+  du **code** et non des données. Conséquence : ces deux-là restaient gelés à
+  leur version du **premier** déploiement. Une personnalité ajoutée au dépôt
+  n'apparaissait donc jamais, même après le correctif de fusion
+  (`ensure_prompts()` comparait avec un défaut périmé), et modifier un prompt
+  `.txt` n'avait aucun effet en production, alors que c'est tout l'intérêt du
+  couple `prompt_file` / `resolve_prompt()`. Seuls les fichiers réellement
+  nouveaux arrivaient. L'entrypoint réécrit maintenant ces fichiers de
+  référence à chaque démarrage, et continue de ne jamais toucher à
+  `prompts.json`, `knowledge/` ni `llm.json`. Règle à appliquer pour tout
+  nouveau fichier de `config/` : donnée de l'utilisateur -> `cp -rn` ;
+  fourni par le dépôt -> `cp -f`.
 - **Sécurité `/ws`** : par défaut, aucune authentification — n'importe qui
   connaissant l'URL publique peut discuter et consommer la clé API. Si
   `WS_TOKEN` est configuré côté serveur, `/ws`, `/ws-echo`, `/ws-gemini` et les
@@ -162,7 +179,9 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   (`minitel_gpt.py`) tranche **à chaque lecture** : le champ `prompt` s'il est
   renseigné (personnalisation écrite par l'admin web), sinon le contenu du
   `.txt` (défaut du dépôt). Le défaut reste donc vivant - modifier le `.txt` et
-  redéployer suffit tant que l'admin n'a rien saisi - et `ensure_prompts()` ne
+  redéployer suffit tant que l'admin n'a rien saisi, **à condition** que
+  l'entrypoint rafraîchisse ce `.txt` dans le volume : ce n'était pas le cas
+  jusqu'au correctif décrit deux points plus bas - et `ensure_prompts()` ne
   copie plus le texte dans `prompts.json`, pour qu'une installation neuve se
   comporte comme une installation existante. Attention au piège qui a motivé
   ce changement : `p.get("prompt", FALLBACK_PROMPT)` ne protégeait rien, la clé
