@@ -588,9 +588,17 @@ def load_preset():
                    "des accents graves, liens [texte](url))." + MARKUP_INSTRUCTIONS)
         # Un seul llm_settings() pour les trois messages : il relit un fichier.
         provider = llm_settings()["provider"]
+        # Le titre est un BLOC : "title_msg2", s'il est renseigne, devient une
+        # deuxieme ligne juste sous la premiere (show_home decoupe sur "\n").
+        # Passer par le tuple existant evite de changer la signature de
+        # load_preset et de show_home pour une ligne optionnelle.
+        titre = expand_vars(p.get("title_msg", "*** MINITEL GPT ***"), provider)
+        titre2 = expand_vars(p.get("title_msg2", ""), provider)
+        if titre2.strip():
+            titre += "\n" + titre2
         return (
             prompt,
-            expand_vars(p.get("title_msg", "*** MINITEL GPT ***"), provider),
+            titre,
             expand_vars(p.get("question_msg", "Posez votre question :"), provider),
             expand_vars(p.get("loading_msg", "Consultation en cours..."), provider),
             render_logo(p),
@@ -816,7 +824,8 @@ def show_home(t, title_msg, question_msg, title_lines=None):
         t.center(ln)
     t.w(bytes([CR, LF, CR, LF]))      # 2 lignes après le logo
     t.w(FG_YELLOW)
-    t.center(title_msg)
+    for ln in title_msg.split("\n"):     # 2e ligne optionnelle (title_msg2)
+        t.center(ln)
     t.w(bytes([CR, LF, CR, LF]))      # ligne vide après le message titre
     t.w(FG_WHITE)
     t.center(question_msg)

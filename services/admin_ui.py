@@ -29,6 +29,7 @@ SECRET_KEY = os.getenv("FLASK_SECRET", "minitel-secret-1985")
 
 DEFAULTS = {
     "title_msg": "*** MINITEL GPT ***",
+    "title_msg2": "",
     "question_msg": "Posez votre question :",
     "loading_msg": "Consultation en cours...",
     "logo_text": "",
@@ -481,6 +482,9 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
       <input type=text name=label id=flabel>
       <label>Titre d'accueil (max 40)</label>
       <input type=text name=title_msg id=ftitle maxlength=40>
+      <label>Deuxième ligne du titre (facultative, max 40)</label>
+      <input type=text name=title_msg2 id=ftitle2 maxlength=40
+             placeholder="vide = titre sur une seule ligne">
       <label>Phrase d'invite (max 40)</label>
       <input type=text name=question_msg id=fquestion maxlength=40>
       <label>Message d'attente (max 40)</label>
@@ -642,6 +646,7 @@ document.querySelectorAll('nav.tabs button').forEach(b=>{
 function loadPreset(){
   const k=document.getElementById('presetSel').value, p=PRESETS[k]; if(!p)return;
   fkey.value=k; flabel.value=p.label||''; ftitle.value=p.title_msg||'';
+  ftitle2.value=p.title_msg2||'';
   fquestion.value=p.question_msg||''; floading.value=p.loading_msg||''; fsystem.value=p.prompt||'';
   // Champ vide = aucun override : le terminal lit le .txt du depot. On le dit,
   // sinon un champ vide se lit comme "pas de prompt du tout".
@@ -798,6 +803,7 @@ def save_prompt():
     p = data["presets"].setdefault(k, {})
     p["label"] = request.form.get("label", k).strip() or k
     p["title_msg"] = to_minitel_ascii(request.form.get("title_msg", DEFAULTS["title_msg"]))[:40]
+    p["title_msg2"] = to_minitel_ascii(request.form.get("title_msg2", ""))[:40]
     p["question_msg"] = to_minitel_ascii(request.form.get("question_msg", DEFAULTS["question_msg"]))[:40]
     p["loading_msg"] = to_minitel_ascii(request.form.get("loading_msg", DEFAULTS["loading_msg"]))[:40]
     avert = save_logo_fields(p)
@@ -820,6 +826,7 @@ def apply_preset():
         if request.form.get("label"):
             p["label"] = request.form.get("label").strip()
             p["title_msg"] = to_minitel_ascii(request.form.get("title_msg", DEFAULTS["title_msg"]))[:40]
+            p["title_msg2"] = to_minitel_ascii(request.form.get("title_msg2", ""))[:40]
             p["question_msg"] = to_minitel_ascii(request.form.get("question_msg", DEFAULTS["question_msg"]))[:40]
             p["loading_msg"] = to_minitel_ascii(request.form.get("loading_msg", DEFAULTS["loading_msg"]))[:40]
             save_logo_fields(p)

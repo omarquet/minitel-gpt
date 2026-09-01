@@ -144,6 +144,14 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   `prompts.json`, `knowledge/` ni `llm.json`. Règle à appliquer pour tout
   nouveau fichier de `config/` : donnée de l'utilisateur -> `cp -rn` ;
   fourni par le dépôt -> `cp -f`.
+- **Titre d'accueil sur deux lignes** : `title_msg2`, facultatif, s'affiche
+  juste sous `title_msg`, même couleur. `load_preset()` les rend joints par un
+  `\n` dans la même case du tuple et `show_home()` découpe : pas de signature
+  à changer pour une ligne optionnelle. Vide ou blanc, il ne consomme aucune
+  rangée. Au pire (logo de 12 lignes + titre sur 2 lignes), l'accueil occupe 22
+  rangées sur 24. Les deux routes de l'admin qui enregistrent le formulaire
+  (`/save-prompt` ET `/apply-preset`) doivent traiter tout nouveau champ :
+  n'en traiter qu'une perdrait la saisie en silence à l'activation.
 - **`%MODEL` dans les messages d'écran** : les trois messages d'un preset
   (`title_msg`, `question_msg`, `loading_msg`) passent par `expand_vars()`
   (`minitel_gpt.py`), qui remplace `%model` (insensible à la casse) par le
