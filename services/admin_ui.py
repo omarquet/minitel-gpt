@@ -845,10 +845,7 @@ def test_preset_route():
     # prompt vide, alors que le terminal, lui, lit le .txt.
     prompt_text = ((j.get("prompt") or "").strip()
                    or mg.resolve_prompt(data["presets"][key]))
-    kb = load_knowledge_blob(key)
-    if kb:
-        prompt_text += ("\n\nCONNAISSANCES DE REFERENCE (utilise ces informations "
-                   "en priorite pour repondre) :\n" + kb)
+    prompt_text = mg.with_knowledge(prompt_text, load_knowledge_blob(key))
     # Meme contrainte que load_preset() (minitel_gpt.py) : pas de Markdown.
     prompt_text += ("\n\nContrainte technique absolue : tu t'affiches sur un ecran "
                      "Minitel qui ne sait pas afficher le Markdown. N'utilise "

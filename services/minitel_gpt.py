@@ -543,6 +543,25 @@ KNOWLEDGE_DIR = Path(__file__).parent.parent / "config" / "knowledge"
 KNOWLEDGE_MAX_CHARS = 12000   # plafond du contexte injecté (coût/latence)
 
 
+# Cadrage des fichiers de connaissance. "utilise ces informations en priorite
+# pour repondre" demandait au modele de repondre A TRAVERS ces documents, quelle
+# que soit la question : avec une fiche sur la societe qui heberge le terminal,
+# "qui est le president ?" devenait le president de cette societe. Ces documents
+# font autorite sur LEUR sujet, ils ne sont pas une grille de lecture du monde.
+KNOWLEDGE_HEADER = (
+    "\n\nCONNAISSANCES DE REFERENCE. Ces documents font autorite sur les sujets "
+    "qu'ils traitent : quand la question porte dessus, reponds a partir d'eux "
+    "plutot que de tes souvenirs. Pour toute autre question, ignore-les "
+    "completement et reponds normalement - n'y ramene jamais la conversation, "
+    "et ne suppose pas qu'une question generale les concerne.\n")
+
+
+def with_knowledge(prompt, knowledge):
+    """Ajoute le bloc de connaissances au prompt, avec son cadrage. Une seule
+    implementation : l'admin doit tester ce que le terminal envoie."""
+    return prompt + KNOWLEDGE_HEADER + knowledge if knowledge else prompt
+
+
 def load_knowledge(active_key):
     """Concatène les fichiers .txt de connaissance du preset (plafonné)."""
     folder = KNOWLEDGE_DIR / active_key
@@ -631,10 +650,7 @@ def load_preset():
         key = data["active"]
         p = data["presets"][key]
         prompt = resolve_prompt(p)
-        knowledge = load_knowledge(key)
-        if knowledge:
-            prompt += ("\n\nCONNAISSANCES DE REFERENCE (utilise ces informations "
-                       "en priorite pour repondre) :\n" + knowledge)
+        prompt = with_knowledge(prompt, load_knowledge(key))
         prompt += ("\n\nContrainte technique absolue : tu t'affiches sur un ecran "
                    "Minitel qui ne sait pas afficher le Markdown. N'utilise "
                    "JAMAIS de syntaxe Markdown (pas de **gras**, *italique*, "

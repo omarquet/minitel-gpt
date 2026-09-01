@@ -152,6 +152,15 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   rangées sur 24. Les deux routes de l'admin qui enregistrent le formulaire
   (`/save-prompt` ET `/apply-preset`) doivent traiter tout nouveau champ :
   n'en traiter qu'une perdrait la saisie en silence à l'activation.
+- **Cadrage des fichiers de connaissance** : `KNOWLEDGE_HEADER` /
+  `with_knowledge()` (`minitel_gpt.py`), utilisés par le terminal ET par le
+  test de l'admin. La formulation d'origine, « utilise ces informations en
+  priorité pour répondre », faisait répondre le modèle **à travers** ces
+  documents quelle que soit la question : avec une fiche sur aqoba, « qui est
+  le président ? » devenait le président d'aqoba. Le cadrage actuel dit qu'ils
+  font autorité sur **leur** sujet, et qu'il faut les ignorer complètement pour
+  toute autre question. Si un document déborde encore, c'est son contenu qu'il
+  faut resserrer, pas cette phrase.
 - **La date du jour, toujours injectée** : un LLM ignore la date et en invente
   une si on ne la lui donne pas (un Guide de Paris répondait « nous sommes le
   19 mai 2024 », un autre inventait le jour de la semaine). `date_note()`
