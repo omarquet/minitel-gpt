@@ -152,10 +152,14 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   rangées sur 24. Les deux routes de l'admin qui enregistrent le formulaire
   (`/save-prompt` ET `/apply-preset`) doivent traiter tout nouveau champ :
   n'en traiter qu'une perdrait la saisie en silence à l'activation.
-- **`fixed_year` et la date du jour** : un LLM ignore la date. Si le preset a un
-  `fixed_year`, `fixed_date_note()` (`minitel_gpt.py`) ajoute au prompt
-  « Nous sommes aujourd'hui le 1er septembre 1989 » : jour et mois **réels**,
-  année figée. Elle prend le preset en argument et est appelée par
+- **La date du jour, toujours injectée** : un LLM ignore la date et en invente
+  une si on ne la lui donne pas (un Guide de Paris répondait « nous sommes le
+  19 mai 2024 », un autre inventait le jour de la semaine). `date_note()`
+  (`minitel_gpt.py`) ajoute donc systématiquement au prompt « Nous sommes
+  aujourd'hui le mardi 1er septembre 2026 » : jour de la semaine, jour et mois
+  **réels**, année réelle - sauf si le preset a un `fixed_year`, qui remplace
+  la seule année (« vendredi 1er septembre 1989 », le jour de la semaine étant
+  recalculé pour l'année effective). Elle prend le preset en argument et est appelée par
   `load_preset()`, donc le terminal et le test de l'admin obtiennent la même
   chose - ce n'était pas le cas de l'ancien `with_fixed_date()` de `server.py`,
   qui relisait la personnalité **active** et n'était pas appelé par l'admin :
