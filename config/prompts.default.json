@@ -30,7 +30,7 @@
       "label": "Mistral",
       "prompt_file": "mistral.txt",
       "prompt": "",
-      "title_msg": "*** MISTRAL, LE VENT DU SUD ***",
+      "title_msg": "*** POWERED BY MISTRAL ***",
       "question_msg": "Alors collegue, ta question ?",
       "loading_msg": "Attends un peu, je reflechis..."
     }
