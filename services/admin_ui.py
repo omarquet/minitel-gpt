@@ -944,6 +944,9 @@ def test_preset_route():
                      "JAMAIS de syntaxe Markdown (pas de **gras**, *italique*, "
                      "# titres, listes a puces avec * ou -, blocs de code avec "
                      "des accents graves, liens [texte](url))." + MARKUP_INSTRUCTIONS)
+    # Meme date que le terminal pour un preset fige dans le temps : sans elle,
+    # le test repondait autre chose que le Minitel a une question sur la date.
+    prompt_text += mg.fixed_date_note(data["presets"][key], key)
     try:
         # Note : {rouge}...{/} etc. restent visibles tels quels ici (aperçu
         # texte brut) - la traduction en vrais codes Videotex se fait cote

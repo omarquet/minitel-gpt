@@ -152,14 +152,16 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   rangées sur 24. Les deux routes de l'admin qui enregistrent le formulaire
   (`/save-prompt` ET `/apply-preset`) doivent traiter tout nouveau champ :
   n'en traiter qu'une perdrait la saisie en silence à l'activation.
-- **`fixed_year` et la date du jour** : un LLM ignore la date. Si le preset
-  actif a un `fixed_year`, `with_fixed_date()` (`server.py`) ajoute au prompt
+- **`fixed_year` et la date du jour** : un LLM ignore la date. Si le preset a un
+  `fixed_year`, `fixed_date_note()` (`minitel_gpt.py`) ajoute au prompt
   « Nous sommes aujourd'hui le 1er septembre 1989 » : jour et mois **réels**,
-  année figée. Deux limites à connaître. Le conteneur doit avoir son fuseau
-  (`TZ=Europe/Paris` + `tzdata`), sinon il tourne en UTC et la date est fausse
-  entre minuit et 2 h. Et le test de personnalité de l'admin ne passe PAS par
-  cette fonction (il appelle `llm_answer`, pas `run_session`) : une question
-  sur la date n'y donne donc pas la même réponse que sur le Minitel.
+  année figée. Elle prend le preset en argument et est appelée par
+  `load_preset()`, donc le terminal et le test de l'admin obtiennent la même
+  chose - ce n'était pas le cas de l'ancien `with_fixed_date()` de `server.py`,
+  qui relisait la personnalité **active** et n'était pas appelé par l'admin :
+  une question sur la date n'y donnait pas la même réponse que sur le Minitel.
+  Le conteneur doit avoir son fuseau (`TZ=Europe/Paris` + `tzdata`), sinon il
+  tourne en UTC et la date est fausse entre minuit et 2 h.
 - **`%MODEL` dans les messages d'écran** : les trois messages d'un preset
   (`title_msg`, `question_msg`, `loading_msg`) passent par `expand_vars()`
   (`minitel_gpt.py`), qui remplace `%model` (insensible à la casse) par le

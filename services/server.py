@@ -28,7 +28,6 @@ from collections import deque
 from contextlib import contextmanager
 from itertools import count
 from pathlib import Path
-from datetime import datetime
 from threading import Lock
 
 import requests
@@ -104,38 +103,6 @@ def latest_session():
         if not SESSIONS:
             return None
         return SESSIONS[max(SESSIONS)]
-
-
-# Un LLM ne connait pas la date du jour par lui-meme : pour les presets figes
-# dans le temps (ex. annees80bis), on lui fournit le jour/mois reels ramenes
-# a l'annee configuree via le champ optionnel "fixed_year" du preset actif.
-# FALLBACK_FIXED_YEARS couvre les presets existants dont le prompts.json deja
-# deploye (volume du serveur) n'a pas encore ce champ.
-MOIS_FR = ["janvier", "fevrier", "mars", "avril", "mai", "juin", "juillet",
-           "aout", "septembre", "octobre", "novembre", "decembre"]
-FALLBACK_FIXED_YEARS = {"annees80": 1989, "annees80bis": 1989}
-
-
-def active_preset_raw():
-    try:
-        with open(mg.PROMPTS_FILE, encoding="utf-8") as f:
-            data = json.load(f)
-        return data["active"], data["presets"].get(data["active"], {})
-    except Exception:
-        return None, {}
-
-
-def with_fixed_date(system_prompt):
-    key, preset = active_preset_raw()
-    fixed_year = preset.get("fixed_year") or FALLBACK_FIXED_YEARS.get(key)
-    if not fixed_year:
-        return system_prompt
-    now = datetime.now()
-    # "le 1 septembre" n'existe pas en francais, et le modele recopie ce qu'il
-    # lit : le premier du mois s'ecrit "1er".
-    jour = "1er" if now.day == 1 else str(now.day)
-    date_str = f"{jour} {MOIS_FR[now.month - 1]} {fixed_year}"
-    return system_prompt + f"\n\n[Information systeme] Nous sommes aujourd'hui le {date_str}."
 
 
 # Seule exception ou le personnage a le droit de regarder sur le net en
@@ -364,8 +331,9 @@ def run_session(t):
     """Boucle de conversation, pilotee par un WSTerm. call_llm() (minitel_gpt)
     aiguille lui-meme vers Mistral/Claude/Gemini selon LLM_PROVIDER."""
     while True:                             # boucle sommaire
+        # load_preset ajoute lui-meme la date du jour si le preset est fige
+        # dans le temps (fixed_year), l'admin passant par la meme fonction.
         system_prompt, title_msg, question_msg, loading_msg, logo = load_preset()
-        system_prompt = with_fixed_date(system_prompt)
         history = []
         show_home(t, title_msg, question_msg, logo)
 

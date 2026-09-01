@@ -11,6 +11,7 @@ import re
 import sys
 import logging
 import unicodedata
+from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 import requests
@@ -568,6 +569,31 @@ def expand_vars(text, provider=None):
     return _VAR_MODEL_RE.sub(provider.upper(), text)
 
 
+# Un LLM ne connait pas la date du jour. Pour un preset fige dans le temps, on
+# lui fournit le jour et le mois REELS ramenes a l'annee configuree : le
+# personnage sait quel jour on est sans sortir de son epoque.
+# FALLBACK_FIXED_YEARS couvre les presets des prompts.json deja deployes, qui
+# n'ont pas encore le champ.
+MOIS_FR = ["janvier", "fevrier", "mars", "avril", "mai", "juin", "juillet",
+           "aout", "septembre", "octobre", "novembre", "decembre"]
+FALLBACK_FIXED_YEARS = {"annees80": 1989, "annees80bis": 1989}
+
+
+def fixed_date_note(preset, key=None):
+    """Ligne de date a ajouter au prompt d'un preset fige dans le temps, ou ""
+    s'il n'a pas de fixed_year. Prend le preset en argument plutot que de
+    relire la personnalite active : l'admin teste une personnalite qui n'est
+    pas forcement celle du Minitel."""
+    fixed_year = (preset or {}).get("fixed_year") or FALLBACK_FIXED_YEARS.get(key)
+    if not fixed_year:
+        return ""
+    now = datetime.now()
+    # "le 1 septembre" n'existe pas en francais, et le modele recopie ce qu'il lit.
+    jour = "1er" if now.day == 1 else str(now.day)
+    return ("\n\n[Information systeme] Nous sommes aujourd'hui le "
+            f"{jour} {MOIS_FR[now.month - 1]} {fixed_year}.")
+
+
 def load_preset():
     """Retourne (prompt, title_msg, question_msg, loading_msg).
     Le prompt inclut les fichiers de connaissance du preset s'il y en a."""
@@ -586,6 +612,7 @@ def load_preset():
                    "JAMAIS de syntaxe Markdown (pas de **gras**, *italique*, "
                    "# titres, listes a puces avec * ou -, blocs de code avec "
                    "des accents graves, liens [texte](url))." + MARKUP_INSTRUCTIONS)
+        prompt += fixed_date_note(p, key)      # en dernier : l'info la plus fraiche
         # Un seul llm_settings() pour les trois messages : il relit un fichier.
         provider = llm_settings()["provider"]
         # Le titre est un BLOC : "title_msg2", s'il est renseigne, devient une
