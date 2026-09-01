@@ -642,18 +642,13 @@ def date_note(preset, key=None):
     # "le 1 septembre" n'existe pas en francais, et le modele recopie ce qu'il lit.
     jour = "1er" if now.day == 1 else str(now.day)
     date = " ".join(x for x in (semaine, jour, MOIS_FR[now.month - 1], str(annee)) if x)
-    note = f"\n\n[Information systeme] Nous sommes aujourd'hui le {date}."
-    if not fixed_year:
-        # Donner la date reelle sans plus se retournait contre nous : le modele,
-        # dont l'entrainement s'arrete avant, en deduisait que tout avait pu
-        # changer et refusait de repondre ("le president depend des resultats
-        # des elections en cours"). Un preset fige, lui, DOIT refuser au-dela de
-        # son annee : la consigne ne vaut que pour les autres.
-        note += (" Tes connaissances s'arretent avant cette date : reponds avec "
-                 "ce que tu sais, en signalant si besoin que la situation a pu "
-                 "changer depuis. Ne refuse jamais de repondre au seul motif que "
-                 "la date est recente.")
-    return note
+    # La date, rien de plus. Une consigne du genre "tes connaissances s'arretent
+    # avant cette date, mais reponds quand meme" produit l'inverse de l'effet
+    # recherche : le modele s'en saisit comme d'une excuse et la recite ("mes
+    # connaissances s'arretent avant septembre 2026, consultez les sources
+    # officielles"). Ne pas nommer la limite vaut mieux que la nommer pour
+    # demander de l'ignorer.
+    return f"\n\n[Information systeme] Nous sommes aujourd'hui le {date}."
 
 
 def load_preset():
