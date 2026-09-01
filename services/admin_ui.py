@@ -22,7 +22,6 @@ from minitel_gpt import strip_markdown, MARKUP_INSTRUCTIONS
 PROJ_DIR = Path(__file__).parent.parent
 ASSETS_DIR = PROJ_DIR / "assets"
 PROMPTS_FILE = PROJ_DIR / "config" / "prompts.json"
-PROMPTS_DEFAULT = PROJ_DIR / "config" / "prompts.default.json"
 KNOWLEDGE_DIR = PROJ_DIR / "config" / "knowledge"
 LOGS_DIR = PROJ_DIR / "logs"
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "mistral")
@@ -69,15 +68,11 @@ app = Flask(__name__)
 app.secret_key = SECRET_KEY
 
 # ── Helpers prompts ──────────────────────────────────────────────────────
-def ensure_prompts():
-    """prompts.json est local (gitignoré) : recréé depuis prompts.default.json
-    s'il est absent (1er lancement / après une mise à jour qui ne l'écrase pas)."""
-    if not PROMPTS_FILE.exists() and PROMPTS_DEFAULT.exists():
-        PROMPTS_FILE.write_text(PROMPTS_DEFAULT.read_text(encoding="utf-8"),
-                                encoding="utf-8")
-
+# Creation du fichier et fusion des personnalites par defaut : une seule
+# implementation, celle du terminal (mg.ensure_prompts). L'admin en avait une
+# copie simplifiee, qui aurait diverge des la premiere evolution.
 def load_prompts():
-    ensure_prompts()
+    mg.ensure_prompts()
     with open(PROMPTS_FILE) as f:
         return json.load(f)
 

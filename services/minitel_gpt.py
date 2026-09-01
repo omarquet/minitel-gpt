@@ -166,17 +166,54 @@ PROMPTS_TEXT_DIR = Path(__file__).parent.parent / "config" / "prompts"
 
 
 def ensure_prompts():
-    """prompts.json est local (gitignoré) : si absent (1er lancement / après une
-    mise à jour), on le crée depuis prompts.default.json fourni par le dépôt.
+    """prompts.json est local (gitignoré, et dans le volume en conteneur) : si
+    absent (1er lancement / après une mise à jour), on le crée depuis
+    prompts.default.json fourni par le dépôt.
+
+    S'il existe, on y ajoute les personnalites du defaut qui en sont absentes.
+    Sans ca, une personnalite ajoutee au depot n'apparaissait JAMAIS sur un
+    serveur deja deploye : le volume n'est jamais ecrase (entrypoint.sh en
+    cp -rn), a raison, sinon chaque redeploiement effacerait les
+    personnalisations. Seul l'ajout est fait : ni le contenu des personnalites
+    existantes, ni l'ordre (celui de l'ecran GUIDE), ni "active" ne bougent.
+
+    Effet de bord a connaitre : une personnalite du depot supprimee dans
+    l'admin reapparait au demarrage suivant, "absente" et "supprimee" etant
+    indistinguables sans en tenir une liste.
 
     Le "prompt_file" des presets n'est PAS resolu ici : le copier dans
     prompts.json figerait le defaut du depot en override des la creation, et
     une installation neuve ne se comporterait pas comme une installation
     existante. La resolution se fait a chaque lecture, dans resolve_prompt()."""
-    if PROMPTS_FILE.exists() or not PROMPTS_DEFAULT.exists():
+    if not PROMPTS_DEFAULT.exists():
         return
-    PROMPTS_FILE.write_text(PROMPTS_DEFAULT.read_text(encoding="utf-8"),
-                            encoding="utf-8")
+    if not PROMPTS_FILE.exists():
+        PROMPTS_FILE.write_text(PROMPTS_DEFAULT.read_text(encoding="utf-8"),
+                                encoding="utf-8")
+        return
+    try:
+        with open(PROMPTS_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        with open(PROMPTS_DEFAULT, encoding="utf-8") as f:
+            default = json.load(f)
+        manquantes = [k for k in default.get("presets", {})
+                      if k not in data.get("presets", {})]
+        if not manquantes:
+            return
+        for k in manquantes:                    # ajoutees en fin de liste
+            data["presets"][k] = default["presets"][k]
+        # Ecriture atomique : le fichier est relu a chaque retour au sommaire et
+        # par chaque requete de l'admin, il ne doit jamais etre lu a moitie ecrit.
+        tmp = PROMPTS_FILE.with_suffix(".json.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        tmp.replace(PROMPTS_FILE)
+        log.info("Personnalites ajoutees depuis le defaut du depot : %s",
+                 ", ".join(manquantes))
+    except Exception as e:
+        # Un prompts.json illisible ne doit pas empecher le terminal de
+        # demarrer : load_preset a son propre repli.
+        log.warning("fusion des personnalites par defaut impossible : %s", e)
 
 
 def default_prompt_file(preset):
