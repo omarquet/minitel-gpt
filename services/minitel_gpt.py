@@ -552,6 +552,22 @@ def load_knowledge(active_key):
     return blob[:KNOWLEDGE_MAX_CHARS]
 
 
+# Variables utilisables dans les trois messages d'ecran d'un preset (titre,
+# invite, message d'attente). Volontairement minuscule : ces messages sont
+# ecrits par l'admin web, pas un langage de gabarit a faire vivre.
+_VAR_MODEL_RE = re.compile(r"%model", re.I)
+
+
+def expand_vars(text, provider=None):
+    """Remplace %model (insensible a la casse) par le fournisseur actif en
+    majuscules : MISTRAL, CLAUDE ou GEMINI."""
+    if not text or "%" not in text:
+        return text
+    if provider is None:
+        provider = llm_settings()["provider"]
+    return _VAR_MODEL_RE.sub(provider.upper(), text)
+
+
 def load_preset():
     """Retourne (prompt, title_msg, question_msg, loading_msg).
     Le prompt inclut les fichiers de connaissance du preset s'il y en a."""
@@ -570,11 +586,13 @@ def load_preset():
                    "JAMAIS de syntaxe Markdown (pas de **gras**, *italique*, "
                    "# titres, listes a puces avec * ou -, blocs de code avec "
                    "des accents graves, liens [texte](url))." + MARKUP_INSTRUCTIONS)
+        # Un seul llm_settings() pour les trois messages : il relit un fichier.
+        provider = llm_settings()["provider"]
         return (
             prompt,
-            p.get("title_msg", "*** MINITEL GPT ***"),
-            p.get("question_msg", "Posez votre question :"),
-            p.get("loading_msg", "Consultation en cours..."),
+            expand_vars(p.get("title_msg", "*** MINITEL GPT ***"), provider),
+            expand_vars(p.get("question_msg", "Posez votre question :"), provider),
+            expand_vars(p.get("loading_msg", "Consultation en cours..."), provider),
             render_logo(p),
         )
     except Exception as e:

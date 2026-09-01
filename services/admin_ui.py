@@ -485,6 +485,9 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
       <input type=text name=question_msg id=fquestion maxlength=40>
       <label>Message d'attente (max 40)</label>
       <input type=text name=loading_msg id=floading maxlength=40>
+      <p class=sub style="margin:6px 0 0">Dans ces trois messages, <code>%MODEL</code>
+        est remplacé à l'affichage par le fournisseur actif : MISTRAL, CLAUDE ou
+        GEMINI. Il compte pour sa valeur dans les 40 colonnes.</p>
 
       <div style="border-left:3px solid var(--accent);padding-left:12px;margin:16px 0">
         <h3 style=margin-top:4px>Logo d'accueil</h3>

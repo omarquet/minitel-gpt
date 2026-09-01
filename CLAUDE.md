@@ -144,6 +144,14 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   `prompts.json`, `knowledge/` ni `llm.json`. Règle à appliquer pour tout
   nouveau fichier de `config/` : donnée de l'utilisateur -> `cp -rn` ;
   fourni par le dépôt -> `cp -f`.
+- **`%MODEL` dans les messages d'écran** : les trois messages d'un preset
+  (`title_msg`, `question_msg`, `loading_msg`) passent par `expand_vars()`
+  (`minitel_gpt.py`), qui remplace `%model` (insensible à la casse) par le
+  fournisseur actif en majuscules : MISTRAL, CLAUDE ou GEMINI. La valeur vient
+  de `llm_settings()`, donc elle suit un changement de fournisseur dans l'admin
+  sans redéploiement. Attention aux 40 colonnes : c'est la chaîne **développée**
+  qui est tronquée à l'affichage, pas celle saisie dans l'admin. Volontairement
+  une seule variable, pas un langage de gabarit à faire vivre.
 - **Sécurité `/ws`** : par défaut, aucune authentification — n'importe qui
   connaissant l'URL publique peut discuter et consommer la clé API. Si
   `WS_TOKEN` est configuré côté serveur, `/ws`, `/ws-echo`, `/ws-gemini` et les

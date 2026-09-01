@@ -32,7 +32,7 @@
       "label": "Mistral",
       "prompt_file": "mistral.txt",
       "prompt": "",
-      "title_msg": "*** POWERED BY MISTRAL ***",
+      "title_msg": "*** POWERED BY %MODEL ***",
       "question_msg": "Alors collegue, ta question ?",
       "loading_msg": "Attends un peu, je reflechis...",
       "logo_text": "3615 MISTRAL",
