@@ -30,9 +30,9 @@
       "label": "Mistral",
       "prompt_file": "mistral.txt",
       "prompt": "",
-      "title_msg": "*** MISTRAL ***",
-      "question_msg": "Posez votre question :",
-      "loading_msg": "Consultation en cours..."
+      "title_msg": "*** MISTRAL, LE VENT DU SUD ***",
+      "question_msg": "Alors collegue, ta question ?",
+      "loading_msg": "Attends un peu, je reflechis..."
     }
   }
 }
