@@ -348,7 +348,6 @@ Tout ce qui concerne le LLM (fournisseur, clés, modèles) peut aussi venir de
 
 - Reconnexion / gestion de plusieurs Minitels simultanés côté serveur.
 - Durcir le wss côté ESP32 (empreinte du certificat).
-- Support Gemini dans le formulaire de l'admin web (actuellement env var only).
 - Graphismes semi-graphiques Videotex (mode mosaïque `SO`/`SI`, déjà défini
   dans `minitel_gpt.py` mais jamais utilisé) : logo au démarrage ou petits
   dessins, en blocs 2x3 colorés par caractère (pas de vraie image bitmap
