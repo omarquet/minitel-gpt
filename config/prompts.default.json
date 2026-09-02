@@ -26,12 +26,12 @@
       "label": "Le Guide galactique",
       "prompt_file": "guide_galactique.txt",
       "prompt": "",
-      "title_msg": "*** LE GUIDE GALACTIQUE ***",
-      "title_msg2": "NE PANIQUEZ PAS - AVEC %MODEL",
-      "question_msg": "Je suis Marvin, quelle est votre question ?",
+      "title_msg": "*** NE PANIQUEZ PAS ***",
+      "title_msg2": "Je suis Marvin et j'ai l'aide de %MODEL",
+      "question_msg": "Quelle est votre question ?",
       "loading_msg": "Un instant, je reflechis...",
-      "logo_text": "H2G2",
-      "logo_font": "standard"
+      "logo_text": "LE GUIDE GALACTIQUE",
+      "logo_font": "digital"
     },
     "guide_paris": {
       "label": "Guide touristique Paris",
