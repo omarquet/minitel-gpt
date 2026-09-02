@@ -845,6 +845,13 @@ def _is_soft_wrap(line, nxt):
         return False                            # enumeration : un item par ligne
     if _LABEL_RE.match(nxt) or nxt.strip().isupper():
         return False                            # "Adresse : ...", titre en capitales
+    # Champ ecrit d'un seul trait ("Intervenants : Antoine, Olivier, Ludovic",
+    # 61 colonnes) : le modele replie vers 40, donc au-dela il n'a PAS replie,
+    # la coupure qui suit est voulue. Sans ce garde-fou, la phrase d'apres se
+    # collait a la liste des intervenants ("... Ludovic HAVEL Cette conference
+    # explore..."), vu sur le vrai Minitel.
+    if _LABEL_RE.match(line) and visible_len(line) > COLS:
+        return False
     if line.rstrip()[-1] in _SENTENCE_END:
         return False                            # phrase finie : coupure assumee
     # Une ligne courte a ete coupee volontairement ; une ligne pleine est un repli.

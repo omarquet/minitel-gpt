@@ -137,7 +137,14 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   (ponctuation finale). Le garde-fou décisif est la longueur : une ligne de
   moins de `SOFT_WRAP_MIN_COLS` colonnes a été coupée volontairement, une ligne
   pleine est un repli. Sans le garde-fou sur les labels, deux lignes
-  « Horaires : ... » / « Tarif : ... » sans point final fusionnaient.
+  « Horaires : ... » / « Tarif : ... » sans point final fusionnaient. Ce
+  garde-fou ne portait que sur la ligne SUIVANTE, d'où un second cas vu sur le
+  vrai Minitel : « Intervenants : Antoine Marcou, Olivier Marquet, Ludovic
+  HAVEL » (61 colonnes) suivi du résumé de la session donnait « ... Ludovic
+  HAVEL Cette conference explore... », le début du résumé se lisant comme un
+  intervenant de plus. Un champ **au-delà de 40 colonnes** n'a pas pu être
+  replié par le modèle (il replie vers 40) : la coupure qui le suit est donc
+  voulue.
 - **Volume : données contre fichiers de référence** (piège corrigé, il a coûté
   deux allers-retours). `entrypoint.sh` amorçait tout le volume en `cp -rn`
   (no-clobber), y compris `prompts.default.json` et `prompts/*.txt`, qui sont
