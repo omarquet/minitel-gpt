@@ -124,9 +124,8 @@ serveur.
   plus bas), génération de prompt par IA, **fichiers de connaissance** (.txt)
   injectés dans le contexte, textes d'accueil personnalisables, zone de test
   sans le Minitel.
-- **Paramètres** : choix du **fournisseur d'IA** (Mistral, Claude) avec la clé
-  et le modèle de chacun, logs. (Gemini se configure uniquement par variable
-  d'environnement pour l'instant, pas encore dans ce formulaire.)
+- **Paramètres** : choix du **fournisseur d'IA** (Mistral, Claude, Gemini) avec
+  la clé et le modèle de chacun, logs.
 
 Les personnalités sont stockées dans `config/prompts.json` (créé au premier
 démarrage depuis `config/prompts.default.json`, non versionné), leurs fichiers
