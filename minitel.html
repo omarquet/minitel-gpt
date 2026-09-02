@@ -1,5 +1,6 @@
 <!doctype html>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Conversation Minitel</title>
 <style>
   * { box-sizing: border-box; }
@@ -122,6 +123,22 @@
      comme sur un vrai clavier Minitel (Telic/Alcatel). */
   .fk-terra  { background: #b06a4d; color: #2b2018; }
   .fk-green  { background: #4f9a56; color: #12240f; }
+
+  /* Petits ecrans : la devbar de test doit rester lisible sans debordement
+     horizontal, et les champs de saisie passent a 16px pour empecher Safari
+     iOS de zoomer automatiquement au focus (tout input sous 16px declenche
+     ce zoom, geste involontaire en usage tactile). */
+  @media (max-width: 480px) {
+    body { padding: 12px 8px; gap: 12px; }
+    .devbar {
+      grid-template-columns: 1fr; gap: 8px; padding: 10px;
+    }
+    .devbar-row { display: flex; flex-wrap: wrap; gap: 8px; }
+    .devbar input { min-width: 0; flex: 1 1 100%; font-size: 16px; }
+    .devbar button { flex: 1 1 auto; }
+    .status { margin-left: 0; }
+    .typeslot input { font-size: 16px; }
+  }
 </style>
 
 <div class="devbar">
