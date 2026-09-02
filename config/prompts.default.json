@@ -42,6 +42,17 @@
       "question_msg": "Que voulez-vous visiter ?",
       "loading_msg": "Je consulte le guide..."
     },
+    "ia": {
+      "label": "3615 IA",
+      "prompt_file": "ia.txt",
+      "prompt": "",
+      "title_msg": "*** TOUT SAVOIR SUR L'IA ***",
+      "title_msg2": "AVEC %MODEL",
+      "question_msg": "Votre question sur l'IA :",
+      "loading_msg": "Je fais chauffer les neurones...",
+      "logo_text": "3615 IA",
+      "logo_font": "standard"
+    },
     "mistral": {
       "label": "Mistral",
       "prompt_file": "mistral.txt",
