@@ -274,7 +274,17 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   `CACHE_VERSION` doit être incrémentée dès que le contenu stocké change de
   nature - sinon les fiches déjà relevées ne sont jamais rouvertes, leur
   `modified` n'ayant pas bougé (c'est ce qui serait arrivé en passant des
-  extraits de 320 caractères au texte entier).
+  extraits de 320 caractères au texte entier, puis du texte aplati au texte
+  en paragraphes).
+- **Les descriptions gardent leurs paragraphes** (`_texte(..., paragraphes=True)`).
+  Le nettoyage HTML général écrase tous les blancs, ce qui est juste pour une
+  carte du programme - elle doit tenir sur UNE ligne - et faux pour une
+  description : les fiches sont écrites en `<p>` (7 paragraphes en médiane), et
+  aplaties elles donnaient un pavé de 24 lignes illisible sur 40 colonnes. Les
+  fins de `<p>`, `<br>` et `<li>` deviennent donc des retours à la ligne, les
+  `<p>&nbsp;</p>` d'espacement sont jetés, et le prompt demande de restituer
+  ces paragraphes séparés par une ligne vide - la mise en page est la seule
+  chose que le modèle ajoute au texte de l'intervenant.
 - **Prompt système en deux couches** : un preset peut avoir
   `"prompt_file": "nom.txt"` (fichier dans `config/prompts/`) au lieu d'un
   `"prompt"` échappé sur une seule ligne. `resolve_prompt()`

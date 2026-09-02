@@ -36,7 +36,7 @@ PRESET_KEY = "agile_en_seine"
 # Format du cache des descriptions. A incrementer quand ce qu'on stocke change :
 # les fiches deja relevees sont sinon conservees telles quelles, leur date de
 # modification n'ayant pas bouge. La v1 gardait des extraits de 320 caracteres.
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 # Plafond du contenu injecte, aligne sur celui des fichiers de connaissance.
 # A 4000 caracteres, plus de la moitie du programme etait coupee (42 creneaux
 # horaires sur 100) et la troncature tombait en plein titre de session : le
@@ -67,8 +67,8 @@ DESC_WORKERS = 4
 # horaire de conference qui ne bouge pas toutes les minutes.
 PROG_TTL = 300
 # Sur la fiche, la description est entre ce titre et la biographie du speaker.
-_DESC = re.compile(r"[AÀ] propos de cette session (.*?)"
-                   r"(?: Speakers? |Aucun speaker|$)", re.S)
+_DESC = re.compile(r"[AÀ] propos de cette session\s*(.*?)"
+                   r"(?:\s*Speakers?\s|\s*Aucun speaker|$)", re.S)
 # Chaque carte du programme est un lien vers sa fiche : le slug identifie la
 # session, le corps du lien porte l'horaire, le titre, les intervenants, la
 # salle, le format et les themes.
@@ -90,14 +90,29 @@ def is_question(text):
     return any(k in t for k in KEYWORDS)
 
 
-def _texte(fragment):
+def _texte(fragment, paragraphes=False):
     """HTML -> texte lisible : scripts et styles jetes, balises retirees,
     entites decodees (&rsquo; et &#038; pullulent dans les titres), et le
-    message d'etat vide supprime."""
+    message d'etat vide supprime.
+
+    `paragraphes` conserve la structure du texte source (fins de <p>, <br>,
+    <li>) en autant de lignes. Indispensable pour les descriptions, que la
+    version aplatie rendait en un pave de 24 lignes sur l'ecran ; interdit
+    pour les cartes du programme, dont chacune doit tenir sur UNE ligne."""
     x = re.sub(r"<script[^>]*>.*?</script>", " ", fragment, flags=re.S | re.I)
     x = re.sub(r"<style[^>]*>.*?</style>", " ", x, flags=re.S | re.I)
-    x = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", x)).strip()
-    return _EMPTY_NOTICE.sub("", unescape(x)).strip()
+    if paragraphes:
+        x = re.sub(r"</(?:p|li|h[1-6])\s*>|<br\s*/?>", "\n", x, flags=re.I)
+    x = unescape(re.sub(r"<[^>]+>", " ", x))
+    if paragraphes:
+        # Les <p>&nbsp;</p> qui servent d'espaceurs deviennent des lignes vides
+        # apres nettoyage : on ne garde que les paragraphes qui disent quelque
+        # chose, et c'est l'affichage qui les separera.
+        lignes = [re.sub(r"\s+", " ", ln).strip() for ln in x.split("\n")]
+        x = "\n".join(ln for ln in lignes if ln)
+    else:
+        x = re.sub(r"\s+", " ", x).strip()
+    return _EMPTY_NOTICE.sub("", x).strip()
 
 
 def _sessions(grille, descriptions):
@@ -115,7 +130,9 @@ def _sessions(grille, descriptions):
         lignes.append(entete)
         desc = descriptions.get(slug, "")
         if desc:
-            lignes.append("   Description : " + _tronque(desc))
+            lignes.append("   Description (a restituer telle quelle, "
+                          "un paragraphe par ligne) :")
+            lignes += ["   " + para for para in _tronque(desc).split("\n")]
     return "\n".join(lignes)
 
 
@@ -124,7 +141,7 @@ def _tronque(texte, n=DESC_MAX_CHARS):
     if len(texte) <= n:
         return texte
     coupe = texte[:n]
-    return coupe[:coupe.rfind(" ")].rstrip(" ,;:") + "..."
+    return coupe[:max(coupe.rfind(" "), coupe.rfind("\n"))].rstrip(" ,;:") + "..."
 
 
 def _description(lien):
@@ -133,8 +150,8 @@ def _description(lien):
     try:
         r = requests.get(lien, timeout=TIMEOUT)
         r.raise_for_status()
-        m = _DESC.search(_texte(r.text))
-        return " ".join(m.group(1).split()) if m else ""
+        m = _DESC.search(_texte(r.text, paragraphes=True))
+        return m.group(1).strip() if m else ""
     except Exception as e:
         log.warning("fiche %s: %s", lien, e)
         return ""
