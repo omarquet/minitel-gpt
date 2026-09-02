@@ -174,6 +174,13 @@ def _refresh_descriptions():
         tmp.replace(DESCRIPTIONS_FILE)
         log.info("descriptions AES: %d fiches relevees, %d au total",
                  len(neuves), len(cache) - 1)
+        if neuves:
+            # Le texte du programme a ete fabrique AVANT ces descriptions : le
+            # garder, c'est repondre "pas de resume pour cette session" pendant
+            # encore PROG_TTL alors qu'on vient de le relever. On le vide, pour
+            # que le prochain appel le reconstruise sur-le-champ au lieu de
+            # servir une fois de plus la version sans descriptions.
+            _prog_cache.update(releve_le=0.0, texte="")
     except Exception as e:
         log.warning("rafraichissement des descriptions AES: %s", e)
     finally:
@@ -243,6 +250,18 @@ def programme():
     return _prog_cache["texte"]
 
 
+def warm():
+    """Prepare les deux caches au demarrage du serveur, en tache de fond.
+
+    Sans ca, les premieres questions posees apres un deploiement tombent sur un
+    programme sans descriptions - et le modele repond alors, avec aplomb, que
+    le programme officiel ne contient pas de resume pour cette session."""
+    def travail():
+        _refresh_descriptions()          # le plus long (50 fiches, ~23 s)
+        programme()                      # puis le programme, qui les inclut
+    threading.Thread(target=travail, daemon=True).start()
+
+
 def prompt_note(key=None, question=""):
     """Bloc a ajouter au prompt systeme : l'heure qu'il est, puis le programme.
     Chaine vide si la question ne concerne pas Agile en Seine.
@@ -257,6 +276,11 @@ def prompt_note(key=None, question=""):
     if not prog:
         return ("\n\n[Information systeme] La page du programme est injoignable "
                 "pour le moment : dis-le plutot que d'inventer des sessions.")
+    if "Description :" not in prog:
+        prog += ("\n(Les descriptions des sessions ne sont pas encore chargees. "
+                 "Si on t'en demande une, dis qu'elle arrive dans un instant et "
+                 "propose de reposer la question - n'affirme JAMAIS que le "
+                 "programme ne contient pas de resume.)")
     now = datetime.now()
     return (f"\n\n[Information systeme] Il est {now.hour}h{now.minute:02d}, "
             f"heure de Paris.\n"

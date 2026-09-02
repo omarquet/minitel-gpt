@@ -62,6 +62,11 @@ log = logging.getLogger("minitel-ws")
 
 sock = Sock(app)
 
+# Caches d'Agile en Seine prepares des le demarrage : relever les 50 fiches de
+# session prend une vingtaine de secondes, autant ne pas les faire attendre au
+# premier visiteur.
+conf_aes.warm()
+
 # URL publique de l'admin, affichee sur le Minitel via la touche GUIDE.
 ADMIN_URL = os.getenv("ADMIN_PUBLIC_URL", "")
 
