@@ -1,6 +1,17 @@
 {
   "active": "annees80",
   "presets": {
+    "agile_en_seine": {
+      "label": "Agile en Seine",
+      "prompt_file": "agile_en_seine.txt",
+      "prompt": "",
+      "title_msg": "*** AGILE EN SEINE 2026 ***",
+      "title_msg2": "PROGRAMME LIVE AVEC %MODEL",
+      "question_msg": "Quelle session cherchez-vous ?",
+      "loading_msg": "Je consulte le programme...",
+      "logo_text": "3615 AES",
+      "logo_font": "standard"
+    },
     "annees80": {
       "label": "Années 80",
       "prompt_file": "annees80.txt",

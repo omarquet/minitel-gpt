@@ -651,6 +651,18 @@ def date_note(preset, key=None):
     return f"\n\n[Information systeme] Nous sommes aujourd'hui le {date}."
 
 
+def active_preset_key():
+    """Identifiant de la personnalite active. load_preset() ne le renvoie pas
+    (il rend deja cinq valeurs) et l'appelant en a besoin pour les traitements
+    propres a une personnalite donnee."""
+    try:
+        ensure_prompts()
+        return json.load(open(PROMPTS_FILE))["active"]
+    except Exception as e:
+        log.warning("prompts.json (active): %s", e)
+        return ""
+
+
 def load_preset():
     """Retourne (prompt, title_msg, question_msg, loading_msg).
     Le prompt inclut les fichiers de connaissance du preset s'il y en a."""

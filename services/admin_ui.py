@@ -17,6 +17,8 @@ from werkzeug.utils import secure_filename
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
 import minitel_gpt as mg
+# Contenu evenementiel, isole pour etre retirable d'un bloc (voir conf_aes.py).
+import conf_aes
 from minitel_gpt import strip_markdown, MARKUP_INSTRUCTIONS
 
 PROJ_DIR = Path(__file__).parent.parent
@@ -855,6 +857,9 @@ def test_preset_route():
     # Meme date que le terminal pour un preset fige dans le temps : sans elle,
     # le test repondait autre chose que le Minitel a une question sur la date.
     prompt_text += mg.date_note(data["presets"][key], key)
+    # Meme programme que le terminal : sans cet appel, tester la
+    # personnalite Agile en Seine ici repondait sans le programme.
+    prompt_text += conf_aes.prompt_note(key, msg)
     try:
         # Note : {rouge}...{/} etc. restent visibles tels quels ici (aperçu
         # texte brut) - la traduction en vrais codes Videotex se fait cote

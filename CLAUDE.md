@@ -34,14 +34,21 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   fonctions de `minitel_gpt.py` via une classe `WSTerm` (même interface
   `w`/`clear`/`line`/`center`/`read_byte`/`read_key`), mais les octets Videotex
   circulent sur la WebSocket. Ajoute aussi `/ws-echo` et `/ws-gemini` (test),
-  la protection `WS_TOKEN`, l'injection de la date réelle (`fixed_year`), et
-  l'accès web live pour Agile en Seine 2026 (seule exception à la coupure de
-  connaissances post-1989, voir `config/prompts.default.json`).
+  la protection `WS_TOKEN` et l'injection de la date réelle (`fixed_year`).
   `show_guide_ws()` (touche GUIDE) permet aussi de changer de personnalité
   active directement depuis le Minitel (liste numérotée, écrit `data["active"]`
   dans `prompts.json`), en plus d'afficher l'URL de l'admin.
   Sert enfin la dictée depuis un téléphone : `/dictee` (la page), `/dictee/status`
   et `/dictee/inject`, adossés au registre `SESSIONS` des sessions ouvertes.
+- `services/conf_aes.py` — **tout Agile en Seine, et rien d'autre**, isolé
+  exprès pour être supprimable d'un bloc quand la conférence sera passée
+  (effacer le fichier, les deux appels à `prompt_note()` dans `server.py` et
+  `admin_ui.py`, la personnalité `agile_en_seine` et son `.txt`). C'est la
+  seule fenêtre du projet sur le web en temps réel : le programme change
+  jusqu'au dernier moment, donc la page officielle est relue à chaque
+  question - pour la personnalité dédiée systématiquement, pour les autres
+  sur mot-clef (les Années 80 en font une de leurs deux exceptions
+  factuelles). Pas de tool-calling générique, juste ce cas précis, en dur.
 - `Dockerfile` + `entrypoint.sh` + `requirements.txt` — image Python 3.11,
   lancée par gunicorn (`-k gthread`). L'entrypoint amorce le volume config, et
   y **remet à jour à chaque démarrage** les fichiers de référence du dépôt
@@ -221,6 +228,21 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
      suffixe) parce que la dictée iOS réécrit ses phrases en cours de route.
      Son `toAscii()` recopie donc `_ASCII_REPL` à l'identique : si les deux
      translittérations divergent d'un caractère, `back` efface à côté.
+- **Programme d'Agile en Seine : deux jours dans une seule page** (`conf_aes.py`).
+  La conférence dure deux jours et la page rend les DEUX journées dans le même
+  HTML, en deux grilles que des onglets JavaScript montrent à tour de rôle.
+  L'ancienne version aplatissait tout : mises bout à bout sans marqueur, rien
+  ne distinguait le mardi du mercredi et le modèle annonçait des sessions du
+  jour 2 pour le jour 1. `fetch()` découpe donc sur `<!-- end Loop Grid -->` et
+  préfixe chaque bloc de l'intitulé de son onglet. Deux autres pièges de cette
+  page : chaque grille embarque un « Aucun programme n'est prévu à cette date »
+  **caché en `display:none`** (recopié tel quel, il faisait déclarer vide une
+  journée pleine), et les titres sont pleins d'entités HTML (`&rsquo;`,
+  `&#038;`) qu'il faut décoder. Enfin, `prompt_note()` ajoute **l'heure de
+  Paris** : `date_note()` ne donne que le jour, or sans l'heure « les
+  prochaines conférences » ne veut rien dire. Il est appelé des DEUX côtés
+  (terminal et test de l'admin), sinon la personnalité répondrait sans le
+  programme dans l'admin - le piège exact de l'ancien `with_fixed_date()`.
 - **Prompt système en deux couches** : un preset peut avoir
   `"prompt_file": "nom.txt"` (fichier dans `config/prompts/`) au lieu d'un
   `"prompt"` échappé sur une seule ligne. `resolve_prompt()`

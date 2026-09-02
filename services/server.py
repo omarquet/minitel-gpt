@@ -30,8 +30,6 @@ from itertools import count
 from pathlib import Path
 from threading import Lock
 
-import requests
-
 # Les fichiers d'origine sont dans services/ ; on s'assure qu'ils sont importables.
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -43,6 +41,8 @@ from admin_ui import app
 
 # On reutilise la logique d'ecran / lecture clavier / appel LLM partagee.
 import minitel_gpt as mg
+# Contenu evenementiel, isole pour etre retirable d'un bloc (voir conf_aes.py).
+import conf_aes
 from minitel_gpt import (
     load_preset, call_llm, call_gemini, to_ascii, strip_markdown,
     apply_minitel_markup, visible_len, visible_truncate, wrap,
@@ -103,38 +103,6 @@ def latest_session():
         if not SESSIONS:
             return None
         return SESSIONS[max(SESSIONS)]
-
-
-# Seule exception ou le personnage a le droit de regarder sur le net en
-# temps reel : le programme d'Agile en Seine, qui change jusqu'au dernier
-# moment. Pas de tool-calling generique, juste ce cas precis, en dur.
-AGILE_EN_SEINE_URL = "https://www.agileenseine.com/programme-2026/"
-AGILE_EN_SEINE_KEYWORDS = ("agile en seine", "agileenseine", "aes")
-# Plafond du contenu injecte, aligne sur celui des fichiers de connaissance.
-# A 4000 caracteres, plus de la moitie du programme etait coupee (42 creneaux
-# horaires conserves sur 100) et la troncature tombait en plein titre de
-# session : le modele repondait alors a cote sur les conferences de fin de
-# journee, sans rien signaler.
-AGILE_EN_SEINE_MAX_CHARS = 12000
-
-
-def is_agile_en_seine_question(text):
-    t = text.lower()
-    return any(k in t for k in AGILE_EN_SEINE_KEYWORDS)
-
-
-def fetch_agile_en_seine_context():
-    try:
-        r = requests.get(AGILE_EN_SEINE_URL, timeout=5)
-        r.raise_for_status()
-        html = re.sub(r"<script[^>]*>.*?</script>", " ", r.text, flags=re.S | re.I)
-        html = re.sub(r"<style[^>]*>.*?</style>", " ", html, flags=re.S | re.I)
-        text = re.sub(r"<[^>]+>", " ", html)
-        text = re.sub(r"\s+", " ", text).strip()
-        return text[:AGILE_EN_SEINE_MAX_CHARS]
-    except Exception as e:
-        log.warning("fetch agile en seine: %s", e)
-        return ""
 
 
 class WSClosed(Exception):
@@ -334,6 +302,7 @@ def run_session(t):
         # load_preset ajoute lui-meme la date du jour si le preset est fige
         # dans le temps (fixed_year), l'admin passant par la meme fonction.
         system_prompt, title_msg, question_msg, loading_msg, logo = load_preset()
+        preset_key = mg.active_preset_key()
         history = []
         show_home(t, title_msg, question_msg, logo)
 
@@ -363,13 +332,9 @@ def run_session(t):
             log.info("Q: %r", question)
 
             t.w(bytes([CR, LF])); t.w(FG_CYAN); t.line(""); t.center(loading_msg)
-            call_prompt = system_prompt
-            if is_agile_en_seine_question(question):
-                ctx = fetch_agile_en_seine_context()
-                if ctx:
-                    call_prompt += ("\n\nCONTENU ACTUEL DE LA PAGE DU PROGRAMME (extrait "
-                                     "brut, utilise ces infos pour repondre precisement) "
-                                     ":\n" + ctx)
+            # Programme d'Agile en Seine : injecte a chaque question pour la
+            # personnalite dediee, et sur mot-clef pour les autres.
+            call_prompt = system_prompt + conf_aes.prompt_note(preset_key, question)
             try:
                 answer = to_ascii(strip_markdown(call_llm(call_prompt, history)))
                 history.append({"role": "assistant", "content": answer})
