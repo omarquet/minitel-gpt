@@ -13,3 +13,7 @@ config/prompts.json
 
 # Réglages du LLM écrits par l'admin (clés API) : volume, jamais le dépôt.
 config/llm.json
+
+# Descriptions des sessions Agile en Seine, relevées sur le site : cache, pas du code.
+config/aes_descriptions.json
+config/aes_descriptions.json.tmp

@@ -43,12 +43,13 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
 - `services/conf_aes.py` — **tout Agile en Seine, et rien d'autre**, isolé
   exprès pour être supprimable d'un bloc quand la conférence sera passée
   (effacer le fichier, les deux appels à `prompt_note()` dans `server.py` et
-  `admin_ui.py`, la personnalité `agile_en_seine` et son `.txt`). C'est la
-  seule fenêtre du projet sur le web en temps réel : le programme change
-  jusqu'au dernier moment, donc la page officielle est relue à chaque
-  question - pour la personnalité dédiée systématiquement, pour les autres
-  sur mot-clef (les Années 80 en font une de leurs deux exceptions
-  factuelles). Pas de tool-calling générique, juste ce cas précis, en dur.
+  `admin_ui.py`, la personnalité `agile_en_seine`, son `.txt` et la ligne
+  `config/aes_descriptions.json` du `.gitignore`). C'est la seule fenêtre du
+  projet sur le web en temps réel : le programme change jusqu'au dernier
+  moment, donc la page officielle est relue régulièrement - le contexte est
+  injecté systématiquement pour la personnalité dédiée, et sur mot-clef pour
+  les autres (les Années 80 en font une de leurs deux exceptions factuelles).
+  Pas de tool-calling générique, juste ce cas précis, en dur.
 - `Dockerfile` + `entrypoint.sh` + `requirements.txt` — image Python 3.11,
   lancée par gunicorn (`-k gthread`). L'entrypoint amorce le volume config, et
   y **remet à jour à chaque démarrage** les fichiers de référence du dépôt
@@ -243,6 +244,23 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   prochaines conférences » ne veut rien dire. Il est appelé des DEUX côtés
   (terminal et test de l'admin), sinon la personnalité répondrait sans le
   programme dans l'admin - le piège exact de l'ancien `with_fixed_date()`.
+- **Descriptions des sessions AES : deux caches, pour deux coûts très
+  différents** (`conf_aes.py`). La page du programme ne porte que l'entête des
+  sessions ; la description est sur la fiche de chaque session, soit **50 pages
+  à ouvrir, ~23 s** — impensable pendant qu'un visiteur attend. Elles vivent
+  donc dans `config/aes_descriptions.json` (volume, gitignoré), rafraîchies en
+  tâche de fond, et **seules les fiches nouvelles ou modifiées** sont rouvertes
+  (la liste REST `wp-json/wp/v2/programme?per_page=100` donne le champ
+  `modified` de chacune). Le programme lui-même, lui, coûte 7 s par relevé (la
+  page pèse 2 Mo) : il est gardé 5 minutes en mémoire (`PROG_TTL`) et reconstruit
+  en tâche de fond, sinon chaque question ajoutait 7 s d'attente à celle du
+  modèle. Deux pièges rencontrés : une `requests.Session` **partagée entre
+  threads** n'est pas sûre (réponses gzip corrompues, une fiche sur 50 perdue) —
+  chaque thread fait son propre `requests.get` ; et les descriptions sont
+  tronquées à `DESC_MAX_CHARS` (320) parce qu'une réponse Minitel plafonne à
+  600 caractères de toute façon, alors qu'à 50 sessions chaque centaine de
+  caractères pèse 5 ko de contexte **à chaque question** (le bloc injecté fait
+  déjà ~25 ko, soit ~7 k jetons).
 - **Prompt système en deux couches** : un preset peut avoir
   `"prompt_file": "nom.txt"` (fichier dans `config/prompts/`) au lieu d'un
   `"prompt"` échappé sur une seule ligne. `resolve_prompt()`
