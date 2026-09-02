@@ -263,11 +263,18 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   en tâche de fond, sinon chaque question ajoutait 7 s d'attente à celle du
   modèle. Deux pièges rencontrés : une `requests.Session` **partagée entre
   threads** n'est pas sûre (réponses gzip corrompues, une fiche sur 50 perdue) —
-  chaque thread fait son propre `requests.get` ; et les descriptions sont
-  tronquées à `DESC_MAX_CHARS` (320) parce qu'une réponse Minitel plafonne à
-  600 caractères de toute façon, alors qu'à 50 sessions chaque centaine de
-  caractères pèse 5 ko de contexte **à chaque question** (le bloc injecté fait
-  déjà ~25 ko, soit ~7 k jetons).
+  chaque thread fait son propre `requests.get` ; et le cache garde le texte
+  **intégral**, la troncature se faisant à l'injection (`DESC_MAX_CHARS`), pour
+  que changer d'avis sur la longueur ne coûte pas un nouveau relevé. Ce plafond
+  est aujourd'hui à 4000, c'est-à-dire aucune coupure en pratique (médiane 1215
+  caractères, la plus longue 3968) : la description doit s'afficher mot pour
+  mot, c'est le texte de l'intervenant. **Prix assumé : ~75 ko injectés à
+  chaque question, soit ~20 k jetons.** Baisser `DESC_MAX_CHARS` suffit à
+  revenir à des extraits, sans rien relever à nouveau. Corollaire :
+  `CACHE_VERSION` doit être incrémentée dès que le contenu stocké change de
+  nature - sinon les fiches déjà relevées ne sont jamais rouvertes, leur
+  `modified` n'ayant pas bougé (c'est ce qui serait arrivé en passant des
+  extraits de 320 caractères au texte entier).
 - **Prompt système en deux couches** : un preset peut avoir
   `"prompt_file": "nom.txt"` (fichier dans `config/prompts/`) au lieu d'un
   `"prompt"` échappé sur une seule ligne. `resolve_prompt()`

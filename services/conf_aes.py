@@ -33,12 +33,16 @@ KEYWORDS = ("agile en seine", "agileenseine", "aes")
 # La personnalite dediee, pour qui le programme est injecte a CHAQUE question :
 # "c'est quoi les prochaines confs ?" ne contient aucun mot-clef.
 PRESET_KEY = "agile_en_seine"
+# Format du cache des descriptions. A incrementer quand ce qu'on stocke change :
+# les fiches deja relevees sont sinon conservees telles quelles, leur date de
+# modification n'ayant pas bouge. La v1 gardait des extraits de 320 caracteres.
+CACHE_VERSION = 2
 # Plafond du contenu injecte, aligne sur celui des fichiers de connaissance.
 # A 4000 caracteres, plus de la moitie du programme etait coupee (42 creneaux
 # horaires sur 100) et la troncature tombait en plein titre de session : le
 # modele repondait alors a cote sur les conferences de fin de journee, sans
 # rien signaler.
-MAX_CHARS = 30000
+MAX_CHARS = 90000
 TIMEOUT = 8
 
 # --- Descriptions de session ---------------------------------------------
@@ -49,11 +53,13 @@ TIMEOUT = 8
 # rafraichit en tache de fond.
 REST_URL = "https://www.agileenseine.com/wp-json/wp/v2/programme?per_page=100"
 DESCRIPTIONS_FILE = Path(__file__).parent.parent / "config" / "aes_descriptions.json"
-# La reponse du Minitel plafonne a 600 caracteres : une description de 1200
-# caracteres (la mediane) ne peut de toute facon qu'etre resumee. On en garde
-# de quoi savoir de quoi parle la session, pas le texte integral - a 50
-# sessions, chaque centaine de caracteres pese 5 ko de contexte par question.
-DESC_MAX_CHARS = 320
+# Les descriptions sont injectees ENTIERES : c'est ce qu'on veut afficher a
+# l'ecran, mot pour mot. Le plafond n'est qu'un garde-fou contre une fiche
+# aberrante (mediane 1215 caracteres, la plus longue 3968). Prix a payer,
+# assume : ~66 ko de descriptions dans le contexte a chaque question, soit
+# ~20 k jetons. Baisser cette constante suffit a revenir a des extraits, sans
+# rien relever a nouveau : le cache garde toujours le texte integral.
+DESC_MAX_CHARS = 4000
 DESC_TTL = 6 * 3600
 DESC_WORKERS = 4
 # Le programme lui-meme : la page pese 2 Mo, la relever prend ~7 s. La payer a
@@ -109,7 +115,7 @@ def _sessions(grille, descriptions):
         lignes.append(entete)
         desc = descriptions.get(slug, "")
         if desc:
-            lignes.append("   Description : " + desc)
+            lignes.append("   Description : " + _tronque(desc))
     return "\n".join(lignes)
 
 
@@ -128,7 +134,7 @@ def _description(lien):
         r = requests.get(lien, timeout=TIMEOUT)
         r.raise_for_status()
         m = _DESC.search(_texte(r.text))
-        return _tronque(" ".join(m.group(1).split())) if m else ""
+        return " ".join(m.group(1).split()) if m else ""
     except Exception as e:
         log.warning("fiche %s: %s", lien, e)
         return ""
@@ -151,6 +157,8 @@ def _refresh_descriptions():
         r = requests.get(REST_URL, timeout=TIMEOUT)
         r.raise_for_status()
         cache = _load_descriptions()
+        if cache.get("_version") != CACHE_VERSION:
+            cache = {}                      # format change : on releve tout
         fiches = {}
         for item in r.json():
             slug = item.get("slug")
@@ -168,12 +176,13 @@ def _refresh_descriptions():
         # Sessions disparues du programme : on ne garde pas de fiches mortes.
         cache = {k: v for k, v in cache.items() if k in fiches}
         cache["_releve_le"] = time.time()
+        cache["_version"] = CACHE_VERSION
         tmp = DESCRIPTIONS_FILE.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(cache, ensure_ascii=False, indent=1),
                        encoding="utf-8")
         tmp.replace(DESCRIPTIONS_FILE)
         log.info("descriptions AES: %d fiches relevees, %d au total",
-                 len(neuves), len(cache) - 1)
+                 len(neuves), len(cache) - 2)
         if neuves:
             # Le texte du programme a ete fabrique AVANT ces descriptions : le
             # garder, c'est repondre "pas de resume pour cette session" pendant
@@ -196,7 +205,7 @@ def descriptions():
     if time.time() - cache.get("_releve_le", 0) > DESC_TTL:
         threading.Thread(target=_refresh_descriptions, daemon=True).start()
     return {k: v.get("texte", "") for k, v in cache.items()
-            if isinstance(v, dict)}
+            if isinstance(v, dict)}      # ecarte _releve_le et _version
 
 
 def fetch():
