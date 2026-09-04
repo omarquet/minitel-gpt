@@ -107,6 +107,27 @@ const char* WS_PATH = WS_ENDPOINT "?token=" WS_TOKEN_ENC;
 
 // UART1 vers le Minitel : 1200 bauds, 7 bits de donnees, parite paire, 1 stop.
 // (UART1 et non UART2 : le C3 ne possede pas de troisieme UART.)
+// Reseaux connus, essayes dans l'ordre. Les entrees 2 et 3 n'existent que si
+// secrets.h les definit : un secrets.h d'avant cette liste continue de
+// marcher tel quel, avec un seul reseau.
+struct WifiNet { const char* ssid; const char* pass; };
+static const WifiNet KNOWN_NETS[] = {
+  { WIFI_SSID, WIFI_PASSWORD },
+#ifdef WIFI_SSID2
+  { WIFI_SSID2, WIFI_PASSWORD2 },
+#endif
+#ifdef WIFI_SSID3
+  { WIFI_SSID3, WIFI_PASSWORD3 },
+#endif
+};
+static const uint8_t KNOWN_COUNT = sizeof(KNOWN_NETS) / sizeof(KNOWN_NETS[0]);
+// Reseau actuellement utilise : le filet de reconnexion du loop doit relancer
+// CELUI-LA, pas le premier de la liste.
+static uint8_t currentNet = 0;
+// Delai laisse a chaque reseau avant de passer au suivant. Assez long pour un
+// DHCP lent, assez court pour faire le tour d'une liste de trois sans lasser.
+#define WIFI_TRY_MS 12000
+
 #define MINITEL_RX 4    // ESP32-C3 RX  <- Minitel TX (broche DIN 3)
 #define MINITEL_TX 5    // ESP32-C3 TX  -> Minitel RX (broche DIN 1)
 HardwareSerial Minitel(1);
@@ -184,6 +205,28 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
   }
 }
 
+// Essaie chaque reseau connu a tour de role. Retourne des le premier qui
+// repond. La LED continue de clignoter pendant l'attente : sans moniteur
+// serie, c'est le seul signe de vie.
+bool connectKnown() {
+  for (uint8_t i = 0; i < KNOWN_COUNT; i++) {
+    Serial.printf("[WiFi] essai %u/%u : %s\n", i + 1, KNOWN_COUNT, KNOWN_NETS[i].ssid);
+    WiFi.disconnect();
+    WiFi.begin(KNOWN_NETS[i].ssid, KNOWN_NETS[i].pass);
+    unsigned long t0 = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - t0 < WIFI_TRY_MS) {
+      updateStatusLed();
+      delay(10);
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+      currentNet = i;
+      return true;
+    }
+    Serial.println(" -> pas de reponse");
+  }
+  return false;
+}
+
 void setup() {
   Serial.begin(115200);                       // console de debug (USB CDC sur C3)
   // USB CDC : le port n'est pret que ~1 s apres le boot. Sans cette attente,
@@ -223,20 +266,14 @@ void setup() {
   Minitel.write(0x0D); Minitel.write(0x0A);   // CR LF
 #endif
 
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.print("[WiFi] connexion");
-  // Attente active plutot qu'un delay(400) : la LED doit deja clignoter
-  // pendant cette phase, seul indice disponible sans moniteur serie.
-  unsigned long lastDot = 0;
-  while (WiFi.status() != WL_CONNECTED) {
-    updateStatusLed();
-    if (millis() - lastDot > 400) {
-      Serial.print(".");
-      lastDot = millis();
-    }
-    delay(10);
+  // Tour de la liste, indefiniment : le Minitel peut etre allume avant la box.
+  // Le tour entier prend KNOWN_COUNT x 12 s, la LED clignotant pendant tout ce
+  // temps ; aucun redemarrage n'est necessaire quand le reseau revient.
+  while (!connectKnown()) {
+    Serial.println("[WiFi] aucun reseau connu n'a repondu, nouveau tour");
   }
-  Serial.printf("\n[WiFi] OK, IP %s\n", WiFi.localIP().toString().c_str());
+  Serial.printf("[WiFi] OK sur %s, IP %s\n", KNOWN_NETS[currentNet].ssid,
+                WiFi.localIP().toString().c_str());
   // On n'affiche PAS WS_PATH en entier : il contient le token.
   Serial.printf("[WS] cible : %s:%d%s?token=***\n", WS_HOST, WS_PORT, WS_ENDPOINT);
 
@@ -287,8 +324,11 @@ void loop() {
       wifiRetried = true;
       Serial.println("[WiFi] 30 s sans reseau -> relance de la connexion");
       WiFi.disconnect();
-      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+      WiFi.begin(KNOWN_NETS[currentNet].ssid, KNOWN_NETS[currentNet].pass);
     } else if (millis() - wifiDownSince > 120000) {
+      // Le redemarrage refait le tour complet de la liste, ce que la relance
+      // ci-dessus ne fait pas : c'est ainsi qu'on bascule sur le reseau de
+      // secours quand le reseau habituel disparait pour de bon.
       Serial.println("[WiFi] 2 min sans reseau -> redemarrage");
       Serial.flush();
       ESP.restart();
