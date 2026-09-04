@@ -368,9 +368,9 @@ def show_models_ws(t):
 def run_session(t):
     """Boucle de conversation, pilotee par un WSTerm. call_llm() (minitel_gpt)
     aiguille lui-meme vers Mistral/Claude/Gemini selon LLM_PROVIDER."""
-    # Une fois par connexion : sans ca, tout ce que tape le visiteur arrive en
-    # capitales et la touche Majuscule ne sert a rien (cf. KEYBOARD_LOWERCASE).
-    t.w(mg.KEYBOARD_LOWERCASE)
+    # Une fois par connexion : le clavier revient aux capitales, le mode
+    # d'origine du Minitel (cf. KEYBOARD_UPPERCASE).
+    t.w(mg.KEYBOARD_UPPERCASE)
     while True:                             # boucle sommaire
         # load_preset ajoute lui-meme la date du jour si le preset est fige
         # dans le temps (fixed_year), l'admin passant par la meme fonction.
