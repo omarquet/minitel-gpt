@@ -86,9 +86,24 @@
 #include "secrets.h"
 
 // ============ A CONFIGURER ============
-// Mettre 1 pour tester en LOCAL (serveur docker sur ton Mac, ws:// non chiffre)
-// Mettre 0 pour la PROD sur Coolify (wss:// chiffre)
-#define USE_LOCAL 0
+// Serveur, port et transport : dans secrets.h (modele : secrets.h.example).
+// Rien de tout cela n'a sa place ici - firmware.ino est du code, pas la
+// configuration d'une machine : un nom de domaine ou une IP locale versionnes,
+// c'est du fichier suivi par git qu'il faut modifier pour un simple test.
+//   USE_LOCAL 1 = serveur sur ta machine, ws:// non chiffre  -> WS_HOST_LOCAL
+//   USE_LOCAL 0 = production derriere un reverse proxy, wss:// -> WS_HOST_PROD
+#ifndef USE_LOCAL
+  #error "secrets.h doit definir USE_LOCAL (voir secrets.h.example)"
+#endif
+#if USE_LOCAL
+  #if !defined(WS_HOST_LOCAL) || !defined(WS_PORT_LOCAL)
+    #error "USE_LOCAL 1 : secrets.h doit definir WS_HOST_LOCAL et WS_PORT_LOCAL"
+  #endif
+#else
+  #if !defined(WS_HOST_PROD) || !defined(WS_PORT_PROD)
+    #error "USE_LOCAL 0 : secrets.h doit definir WS_HOST_PROD et WS_PORT_PROD"
+  #endif
+#endif
 
 // 0 = fonctionnement normal.
 // 1 = trace sur le moniteur serie tout ce qui arrive du Minitel.
@@ -100,13 +115,11 @@
 #define DEBUG_UART 0
 
 #if USE_LOCAL
-  // IP locale de ton Mac. La trouver avec :
-  //   ipconfig getifaddr en0
-  const char* WS_HOST = "192.168.1.116";
-  const int   WS_PORT = 8080;
+  const char* WS_HOST = WS_HOST_LOCAL;
+  const int   WS_PORT = WS_PORT_LOCAL;
 #else
-  const char* WS_HOST = "minitel.playground.aqoba.fr";
-  const int   WS_PORT = 443;
+  const char* WS_HOST = WS_HOST_PROD;
+  const int   WS_PORT = WS_PORT_PROD;
 #endif
 
 // Pour isoler un souci materiel : basculer sur "/ws-echo", ou le serveur
