@@ -63,6 +63,14 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   Relais brut. Le C3 n'a pas d'UART2 et ses GPIO11-17 sont pris par la flash :
   les GPIO16/17 du projet d'origine sont inutilisables. Identifiants WiFi et
   token WS dans `firmware/secrets.h` (ignoré par git, modèle `secrets.h.example`).
+  Se connecte dans l'ordre : réseau mémorisé en NVS, puis `WIFI_SSID`,
+  `WIFI_SSID2`, `WIFI_SSID3` (les deux derniers facultatifs, `#ifdef`). Si rien
+  ne répond, **l'ESP32 prend la parole sur le Minitel** et propose les réseaux
+  du scan, numérotés : le SSID ne se tape jamais, seulement le mot de passe, en
+  clair et assumé. Le réseau retenu est mémorisé. Pour l'oublier : `O` dans ce
+  menu, ou BOOT maintenu 5 s **en fonctionnement** - jamais au démarrage, GPIO9
+  étant la broche de strapping qui met la puce en mode téléversement si elle
+  est basse au reset.
 - `minitel.html` — émulateur Minitel navigateur qui parle le MÊME
   protocole WebSocket binaire que l'ESP32 (rendu Videotex 40 col, touches SEP),
   URL et token WS configurables dans l'interface. Sert à tester SANS matériel.

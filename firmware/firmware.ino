@@ -48,6 +48,18 @@
  *   Le courant disponible sur la broche 5 est faible et mal documente : le
  *   mesurer en charge WiFi avant de considerer le montage fiable.
  *
+ * CONFIGURATION WIFI SANS ORDINATEUR
+ * ----------------------------------
+ * Au demarrage, dans l'ordre : le reseau memorise en NVS (choisi une fois sur
+ * l'ecran du Minitel), puis la liste WIFI_SSID / WIFI_SSID2 / WIFI_SSID3 de
+ * secrets.h. Si rien ne repond, l'ESP32 prend la parole sur le Minitel et
+ * propose les reseaux du scan, numerotes : on choisit au chiffre (le SSID ne
+ * se tape donc jamais), on saisit le mot de passe, et le reseau retenu est
+ * memorise pour les demarrages suivants.
+ * Effacer ce reseau memorise : "O" dans ce menu, ou BOOT maintenu 5 s en
+ * fonctionnement - le seul recours quand la carte est connectee a un reseau
+ * dont on ne veut plus, le menu ne s'affichant alors jamais.
+ *
  * Broches C3 a EVITER : GPIO11-17 (flash), GPIO18/19 (USB natif),
  * GPIO20/21 (UART0 console), GPIO2/9 (strapping au boot).
  * GPIO4 et GPIO5 sont libres et sans contrainte de boot.
@@ -65,6 +77,7 @@
  */
 
 #include <WiFi.h>
+#include <Preferences.h>
 #include <WiFiClientSecure.h>
 #include <WebSocketsClient.h>
 #include <esp_system.h>   // esp_reset_reason() : cause du dernier demarrage
@@ -121,9 +134,11 @@ static const WifiNet KNOWN_NETS[] = {
 #endif
 };
 static const uint8_t KNOWN_COUNT = sizeof(KNOWN_NETS) / sizeof(KNOWN_NETS[0]);
-// Reseau actuellement utilise : le filet de reconnexion du loop doit relancer
-// CELUI-LA, pas le premier de la liste.
-static uint8_t currentNet = 0;
+// Identifiants reellement utilises, quelle que soit leur origine : NVS, liste
+// de secrets.h ou ecran de configuration. Le filet de reconnexion du loop doit
+// relancer CEUX-LA - sinon, connecte via l'ecran de configuration, il tentait
+// le premier reseau de secrets.h, qui n'est justement pas la.
+static String usedSsid, usedPass;
 // Delai laisse a chaque reseau avant de passer au suivant. Assez long pour un
 // DHCP lent, assez court pour faire le tour d'une liste de trois sans lasser.
 #define WIFI_TRY_MS 12000
@@ -142,6 +157,23 @@ HardwareSerial Minitel(1);
 #define STATUS_LED 8
 #define LED_ON     LOW
 #define LED_OFF    HIGH
+
+// Bouton BOUT de la carte. GPIO9 est la broche de strapping qui choisit le
+// mode de demarrage : maintenue basse AU RESET, la puce entre en mode
+// televersement et n'execute pas ce firmware. On ne la lit donc jamais au
+// demarrage, seulement pendant le fonctionnement - ou elle redevient une
+// entree ordinaire avec sa resistance de tirage interne.
+#define BOOT_BTN 9
+// Cinq secondes : BOOT est le SEUL bouton de la carte et un visiteur curieux
+// appuiera dessus. Assez long pour etre delibere, assez court pour qu'on ne
+// relache pas en croyant que ca ne marche pas.
+#define RESET_HOLD_MS 5000
+
+// Reseau appris a l'ecran de configuration, garde en NVS. C'est lui qu'on
+// essaie EN PREMIER au demarrage : une fois configure sur place, le boitier
+// s'y reconnecte seul.
+Preferences prefs;
+#define NVS_NS "wifi"
 
 WebSocketsClient webSocket;
 bool wsConnected = false;
@@ -205,23 +237,268 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Configuration WiFi depuis le Minitel
+//
+// L'ESP32 parle ici au terminal LUI-MEME, en Videotex, avant d'ouvrir la
+// WebSocket : le pont reste strictement octet a octet, aucune machine a etats
+// ne peut avaler une frappe une fois la conversation demarree.
+// Le SSID ne se tape jamais - il se choisit dans la liste du scan, ce qui
+// evite d'avoir a saisir sa casse et ses symboles au clavier Minitel. Le mot
+// de passe, lui, s'affiche en clair : c'est assume.
+// ---------------------------------------------------------------------------
+#define MAX_NETS 27              // 3 pages de 9 : au-dela c'est du bruit de fond
+#define PER_PAGE 9               // un seul chiffre a taper, jamais deux
+#define SETUP_IDLE_MS 120000     // sans frappe : on repart tenter les reseaux connus
+static String netSsid[MAX_NETS];
+static int8_t netRssi[MAX_NETS];
+static uint8_t netCount = 0;
+
+void mnClear() { Minitel.write(0x0C); }                  // FF : efface l'ecran
+void mnLine(const char* s = "") {
+  Minitel.print(s); Minitel.write(0x0D); Minitel.write(0x0A);
+}
+
+// Touche lue, 0 si rien. Les touches de fonction arrivent en SEP + code : on
+// renvoie ce code avec le bit 0x80 mis, pour le distinguer d'un caractere.
+#define K_ENVOI_M  (0x80 | 0x41)
+#define K_SOM_M    (0x80 | 0x46)
+#define K_CORR_M   (0x80 | 0x47)
+#define K_SUITE_M  (0x80 | 0x48)
+uint8_t mnKey() {
+  if (!Minitel.available()) return 0;
+  uint8_t b = (uint8_t) Minitel.read();
+  if (b != 0x13) return b;                               // caractere ordinaire
+  unsigned long t0 = millis();
+  while (!Minitel.available() && millis() - t0 < 500) delay(1);
+  return Minitel.available() ? (0x80 | (uint8_t) Minitel.read()) : 0;
+}
+
+void forgetSaved() {
+  prefs.begin(NVS_NS, false);
+  prefs.clear();
+  prefs.end();
+  Serial.println("[WiFi] reseau memorise efface");
+}
+
+bool hasSaved() {
+  prefs.begin(NVS_NS, true);
+  bool ok = prefs.getString("ssid", "").length() > 0;
+  prefs.end();
+  return ok;
+}
+
+// Appui long sur BOOT : efface le reseau memorise et redemarre sur la liste
+// de secrets.h. Non bloquant, appele depuis toutes les boucles d'attente -
+// c'est le seul recours quand la carte est connectee a un reseau dont on ne
+// veut plus, l'ecran de configuration ne s'affichant alors jamais.
+void checkResetButton() {
+  static unsigned long downSince = 0;
+  if (digitalRead(BOOT_BTN) == LOW) {
+    if (downSince == 0) downSince = millis();
+    digitalWrite(STATUS_LED, LED_ON);        // fixe : aucun autre etat ne l'est
+    if (millis() - downSince >= RESET_HOLD_MS) {
+      forgetSaved();
+      for (uint8_t i = 0; i < 3; i++) {      // 3 flashs : c'est efface
+        digitalWrite(STATUS_LED, LED_OFF); delay(120);
+        digitalWrite(STATUS_LED, LED_ON);  delay(120);
+      }
+      Serial.flush();
+      ESP.restart();
+    }
+  } else {
+    downSince = 0;
+  }
+}
+
+// Attente active commune : la LED continue de vivre et le bouton reste lu.
+void idleTick() { updateStatusLed(); checkResetButton(); delay(5); }
+
+bool tryConnect(const char* ssid, const char* pass, unsigned long timeoutMs) {
+  WiFi.disconnect();
+  WiFi.begin(ssid, pass);
+  unsigned long t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < timeoutMs) idleTick();
+  if (WiFi.status() != WL_CONNECTED) return false;
+  usedSsid = ssid; usedPass = pass;
+  return true;
+}
+
+bool connectSaved() {
+  prefs.begin(NVS_NS, true);
+  String ssid = prefs.getString("ssid", "");
+  String pass = prefs.getString("pass", "");
+  prefs.end();
+  if (!ssid.length()) return false;
+  Serial.printf("[WiFi] reseau memorise : %s\n", ssid.c_str());
+  return tryConnect(ssid.c_str(), pass.c_str(), WIFI_TRY_MS);
+}
+
+const char* stars(int8_t rssi) {
+  if (rssi >= -55) return "****";
+  if (rssi >= -67) return "***";
+  if (rssi >= -78) return "**";
+  return "*";
+}
+
+// Scan, puis trois regles qui rendent la liste lisible : les reseaux caches
+// sont jetes, les bornes qui portent le MEME SSID sont fusionnees (sans quoi
+// un reseau de salle occupe quatre lignes a lui seul), et le tout est trie par
+// signal - les reseaux utilisables se retrouvent donc en page 1.
+void scanNets() {
+  netCount = 0;
+  int n = WiFi.scanNetworks();
+  for (int i = 0; i < n; i++) {
+    String ssid = WiFi.SSID(i);
+    if (!ssid.length()) continue;                        // reseau cache
+    int8_t rssi = WiFi.RSSI(i);
+    bool dup = false;
+    for (uint8_t j = 0; j < netCount; j++) {
+      if (netSsid[j] == ssid) {                          // meme reseau, autre borne
+        if (rssi > netRssi[j]) netRssi[j] = rssi;
+        dup = true;
+        break;
+      }
+    }
+    if (dup) continue;
+    if (netCount >= MAX_NETS) {                          // liste pleine : le
+      uint8_t faible = 0;                                // nouveau ne rentre que
+      for (uint8_t j = 1; j < netCount; j++)             // s'il bat le plus faible
+        if (netRssi[j] < netRssi[faible]) faible = j;
+      if (rssi <= netRssi[faible]) continue;
+      netSsid[faible] = ssid; netRssi[faible] = rssi;
+      continue;
+    }
+    netSsid[netCount] = ssid; netRssi[netCount] = rssi; netCount++;
+  }
+  WiFi.scanDelete();
+  for (uint8_t i = 1; i < netCount; i++) {               // tri par insertion
+    String ssid = netSsid[i]; int8_t rssi = netRssi[i];
+    int8_t j = i - 1;
+    while (j >= 0 && netRssi[j] < rssi) {
+      netSsid[j + 1] = netSsid[j]; netRssi[j + 1] = netRssi[j]; j--;
+    }
+    netSsid[j + 1] = ssid; netRssi[j + 1] = rssi;
+  }
+  Serial.printf("[WiFi] scan : %d entrees -> %u reseaux distincts\n", n, netCount);
+}
+
+void showList(uint8_t page, uint8_t pages) {
+  char buf[48];
+  mnClear();
+  mnLine(); mnLine("   MINITEL GPT - RESEAU WIFI"); mnLine();
+  if (pages > 1) snprintf(buf, sizeof buf, "%u reseaux  -  page %u/%u", netCount, page + 1, pages);
+  else           snprintf(buf, sizeof buf, "%u reseaux", netCount);
+  mnLine(buf); mnLine();
+  for (uint8_t i = 0; i < PER_PAGE; i++) {
+    uint8_t k = page * PER_PAGE + i;
+    if (k >= netCount) break;
+    snprintf(buf, sizeof buf, "%u %-24.24s %s", i + 1, netSsid[k].c_str(), stars(netRssi[k]));
+    mnLine(buf);
+  }
+  mnLine();
+  mnLine("Tapez le numero du reseau");
+  if (pages > 1) mnLine("SUITE = page suivante");
+  mnLine("R = reprendre la recherche");
+  if (hasSaved()) mnLine("O = oublier le reseau memorise");
+}
+
+// Saisie du mot de passe. Le Minitel fait l'echo local des frappes : on ne
+// reaffiche donc que l'effacement (BS espace BS), comme le fait le serveur.
+// Retourne false si le visiteur revient a la liste ou ne tape plus rien.
+bool askPassword(const String& ssid, String& out) {
+  char buf[48];
+  mnClear();
+  mnLine(); mnLine("   MINITEL GPT - RESEAU WIFI"); mnLine();
+  snprintf(buf, sizeof buf, "Reseau : %.28s", ssid.c_str());
+  mnLine(buf); mnLine();
+  mnLine("Mot de passe (affiche en clair) :");
+  mnLine("(vide = reseau ouvert)");
+  Minitel.print("> ");
+  out = "";
+  unsigned long last = millis();
+  while (millis() - last < SETUP_IDLE_MS) {
+    idleTick();
+    uint8_t k = mnKey();
+    if (!k) continue;
+    last = millis();
+    // Un mot de passe vide est valable : c'est un reseau ouvert, cas courant
+    // des reseaux invites. Charge a tryConnect de dire si ca passe ou non.
+    if (k == K_ENVOI_M) return true;
+    if (k == K_SOM_M) return false;
+    if (k == K_CORR_M) {
+      if (out.length()) {
+        out.remove(out.length() - 1);
+        Minitel.write(0x08); Minitel.write(' '); Minitel.write(0x08);
+      }
+      continue;
+    }
+    if (k >= 0x20 && k <= 0x7E && out.length() < 63) out += (char) k;
+  }
+  return false;
+}
+
+// Ecran de configuration complet. Retourne true des qu'un reseau repond.
+// false quand plus personne ne tape : l'appelant refait alors un tour des
+// reseaux connus, pour qu'un boitier allume sans Minitel ne reste pas plante
+// devant un menu que personne ne lit.
+bool wifiSetupOnMinitel() {
+  scanNets();
+  if (!netCount) return false;
+  uint8_t page = 0;
+  uint8_t pages = (netCount + PER_PAGE - 1) / PER_PAGE;
+  showList(page, pages);
+  unsigned long last = millis();
+  while (millis() - last < SETUP_IDLE_MS) {
+    idleTick();
+    uint8_t k = mnKey();
+    if (!k) continue;
+    last = millis();
+    if (k == K_SUITE_M) {                        // tourne en boucle : pas de
+      page = (page + 1) % pages;                 // cul-de-sac, pas de touche
+      showList(page, pages);                     // "page precedente" a coder
+      continue;
+    }
+    if (k == 'R' || k == 'r') { scanNets(); page = 0;
+      pages = (netCount + PER_PAGE - 1) / PER_PAGE; showList(page, pages); continue; }
+    if (k == 'O' || k == 'o') { forgetSaved(); showList(page, pages); continue; }
+    if (k < '1' || k > '9') continue;
+    uint8_t idx = page * PER_PAGE + (k - '1');
+    if (idx >= netCount) continue;
+    String pass;
+    if (!askPassword(netSsid[idx], pass)) { showList(page, pages); last = millis(); continue; }
+    char buf[48];
+    mnClear();
+    mnLine(); mnLine("   MINITEL GPT - RESEAU WIFI"); mnLine();
+    snprintf(buf, sizeof buf, "Connexion a %.24s...", netSsid[idx].c_str());
+    mnLine(buf);
+    if (tryConnect(netSsid[idx].c_str(), pass.c_str(), 20000)) {
+      prefs.begin(NVS_NS, false);
+      prefs.putString("ssid", netSsid[idx]);
+      prefs.putString("pass", pass);
+      prefs.end();
+      mnLine();
+      snprintf(buf, sizeof buf, "Connecte. IP %s", WiFi.localIP().toString().c_str());
+      mnLine(buf); mnLine(); mnLine("Reseau memorise."); mnLine();
+      mnLine("Demarrage du terminal...");
+      delay(1500);
+      return true;
+    }
+    mnLine(); mnLine("Echec : mot de passe refuse"); mnLine("ou reseau hors de portee.");
+    delay(2500);
+    showList(page, pages);
+    last = millis();
+  }
+  return false;
+}
+
 // Essaie chaque reseau connu a tour de role. Retourne des le premier qui
 // repond. La LED continue de clignoter pendant l'attente : sans moniteur
 // serie, c'est le seul signe de vie.
 bool connectKnown() {
   for (uint8_t i = 0; i < KNOWN_COUNT; i++) {
     Serial.printf("[WiFi] essai %u/%u : %s\n", i + 1, KNOWN_COUNT, KNOWN_NETS[i].ssid);
-    WiFi.disconnect();
-    WiFi.begin(KNOWN_NETS[i].ssid, KNOWN_NETS[i].pass);
-    unsigned long t0 = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - t0 < WIFI_TRY_MS) {
-      updateStatusLed();
-      delay(10);
-    }
-    if (WiFi.status() == WL_CONNECTED) {
-      currentNet = i;
-      return true;
-    }
+    if (tryConnect(KNOWN_NETS[i].ssid, KNOWN_NETS[i].pass, WIFI_TRY_MS)) return true;
     Serial.println(" -> pas de reponse");
   }
   return false;
@@ -255,6 +532,7 @@ void setup() {
 
   pinMode(STATUS_LED, OUTPUT);
   digitalWrite(STATUS_LED, LED_OFF);
+  pinMode(BOOT_BTN, INPUT_PULLUP);            // lu seulement apres le boot
 
 #if DEBUG_UART
   // Test du sens ESP32 -> Minitel, independant du WiFi et du serveur : on
@@ -266,13 +544,15 @@ void setup() {
   Minitel.write(0x0D); Minitel.write(0x0A);   // CR LF
 #endif
 
-  // Tour de la liste, indefiniment : le Minitel peut etre allume avant la box.
-  // Le tour entier prend KNOWN_COUNT x 12 s, la LED clignotant pendant tout ce
-  // temps ; aucun redemarrage n'est necessaire quand le reseau revient.
-  while (!connectKnown()) {
-    Serial.println("[WiFi] aucun reseau connu n'a repondu, nouveau tour");
+  // Reseau memorise d'abord (il a ete choisi ici meme, sur place), puis la
+  // liste de secrets.h. Si rien ne repond, on demande au visiteur sur l'ecran
+  // du Minitel - et s'il ne repond pas, on refait un tour tout seul : le
+  // boitier peut tres bien etre allume avant la box, ou sans Minitel branche.
+  while (!connectSaved() && !connectKnown()) {
+    Serial.println("[WiFi] aucun reseau connu n'a repondu -> configuration");
+    if (wifiSetupOnMinitel()) break;
   }
-  Serial.printf("[WiFi] OK sur %s, IP %s\n", KNOWN_NETS[currentNet].ssid,
+  Serial.printf("[WiFi] OK sur %s, IP %s\n", WiFi.SSID().c_str(),
                 WiFi.localIP().toString().c_str());
   // On n'affiche PAS WS_PATH en entier : il contient le token.
   Serial.printf("[WS] cible : %s:%d%s?token=***\n", WS_HOST, WS_PORT, WS_ENDPOINT);
@@ -295,6 +575,7 @@ void setup() {
 void loop() {
   webSocket.loop();
   updateStatusLed();
+  checkResetButton();                         // apres la LED : l'appui la fige
 
 #if DEBUG_UART >= 2
   // Emission periodique du motif de test : donne un signal permanent a sonder
@@ -324,7 +605,7 @@ void loop() {
       wifiRetried = true;
       Serial.println("[WiFi] 30 s sans reseau -> relance de la connexion");
       WiFi.disconnect();
-      WiFi.begin(KNOWN_NETS[currentNet].ssid, KNOWN_NETS[currentNet].pass);
+      WiFi.begin(usedSsid.c_str(), usedPass.c_str());
     } else if (millis() - wifiDownSince > 120000) {
       // Le redemarrage refait le tour complet de la liste, ce que la relance
       // ci-dessus ne fait pas : c'est ainsi qu'on bascule sur le reseau de
