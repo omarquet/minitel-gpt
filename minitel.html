@@ -210,6 +210,10 @@
   let cr = 0;
   let cc = 0;
   let esc = false;
+  // Octets restants d'une sequence protocole (PRO1/2/3) a ignorer. Sans ce
+  // compteur, le "ESC 3A 69 45" qui passe le clavier en minuscules laissait
+  // un "iE" parasite a l'ecran : le decodage ne consomme qu'un octet apres ESC.
+  let escSkip = 0;
 
   const disconnectBtn = document.getElementById('disconnectBtn');
   const fnButtons = document.getElementById('fnButtons');
@@ -238,6 +242,7 @@
     cr = 0;
     cc = 0;
     esc = false;
+    escSkip = 0;
   }
 
   const ESCAPE_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
@@ -297,10 +302,16 @@
 
   function feed(bytes) {
     for (const b of bytes) {
+      if (escSkip > 0) { escSkip--; continue; }
       if (esc) {
         esc = false;
         if (b >= 0x40 && b <= 0x47) curColor = b - 0x40;
         else if (b in SIZE_MAP) curSize = SIZE_MAP[b];
+        // Sequences protocole : PRO1 + 1 octet, PRO2 + 2, PRO3 + 3. Rien a
+        // afficher, elles s'adressent au terminal (clavier, echo, vitesse).
+        else if (b === 0x39) escSkip = 1;
+        else if (b === 0x3A) escSkip = 2;
+        else if (b === 0x3B) escSkip = 3;
         continue;
       }
       switch (b) {

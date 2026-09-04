@@ -417,6 +417,15 @@ log = logging.getLogger(__name__)
 
 # ── Codes Videotex ───────────────────────────────────────────────────────
 ESC, SO, SI, RS, FF, CR, LF, SEP, BS = 0x1B,0x0E,0x0F,0x1E,0x0C,0x0D,0x0A,0x13,0x08
+# Clavier a deux casses (PRO2 START MINUSCULE). Par defaut le Minitel n'envoie
+# que des capitales et la touche Majuscule (fleche vers le haut) n'a aucun
+# effet sur les lettres : il n'existe alors qu'une seule casse. Cette commande
+# debloque les deux - les lettres partent en minuscules et Majuscule donne la
+# capitale, coup par coup, comme sur un clavier ordinaire. Les Minitel 1, qui
+# n'ont pas de minuscules, l'ignorent. Rien a decoder cote serveur : le
+# terminal envoie deja le bon octet et fait l'echo lui-meme.
+KEYBOARD_LOWERCASE = bytes([0x1B, 0x3A, 0x69, 0x45])
+
 # Couleurs de texte (ESC + 0x40-0x47, norme Videotex/Teletel).
 FG_BLACK   = bytes([ESC,0x40])
 FG_RED     = bytes([ESC,0x41])
