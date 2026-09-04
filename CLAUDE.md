@@ -37,7 +37,9 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   la protection `WS_TOKEN` et l'injection de la date réelle (`fixed_year`).
   `show_guide_ws()` (touche GUIDE) permet aussi de changer de personnalité
   active directement depuis le Minitel (liste numérotée, écrit `data["active"]`
-  dans `prompts.json`), en plus d'afficher l'URL de l'admin.
+  dans `prompts.json`), en plus d'afficher l'URL de l'admin. Depuis cet écran,
+  **SUITE ouvre `show_models_ws()`**, le choix du fournisseur d'IA (A/B/C,
+  écrit `provider` dans `config/llm.json`) : accès volontairement non annoncé.
   Sert enfin la dictée depuis un téléphone : `/dictee` (la page), `/dictee/status`
   et `/dictee/inject`, adossés au registre `SESSIONS` des sessions ouvertes.
 - `services/conf_aes.py` — **tout Agile en Seine, et rien d'autre**, isolé
@@ -108,6 +110,12 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   du serveur. Les personnalités/prompts se rechargent à chaud à chaque retour au
   sommaire, et depuis `/save-llm` le fournisseur, le modèle et les clés aussi :
   pas de redémarrage nécessaire.
+- **FNCT ne peut pas servir de raccourci.** C'est un modificateur, comme Shift :
+  seule, elle n'émet rien sur la ligne série, et « FNCT puis GUIDE » arrive au
+  serveur comme un simple GUIDE - indiscernable. L'émulateur du navigateur n'a
+  d'ailleurs aucun moyen de l'envoyer. Le seul équivalent portable d'un
+  raccourci caché est une **séquence de touches réellement émises** (ici GUIDE
+  puis SUITE), toutes les touches de fonction passant par `SEP` + code.
 - **Réglages du LLM : `config/llm.json`, pas `.env`** (piège corrigé, à ne pas
   refaire). `/save-llm` écrivait dans `.env`, et le terminal ne voyait JAMAIS le
   changement, pour deux raisons cumulées : `.env` est à la racine de l'image

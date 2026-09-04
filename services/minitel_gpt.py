@@ -159,6 +159,20 @@ def llm_settings():
     return s
 
 
+def write_llm_settings(updates):
+    """Enregistre des reglages dans config/llm.json, en fusionnant avec
+    l'existant. Les valeurs vides sont ignorees : laisser le champ d'une cle
+    vide dans le formulaire ne doit pas effacer la cle enregistree.
+    Ecriture atomique : le fichier est relu a chaque question du Minitel, il
+    ne doit jamais etre lu a moitie ecrit."""
+    data = read_llm_file()
+    data.update({k: v for k, v in updates.items() if v})
+    LLM_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = LLM_FILE.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(LLM_FILE)
+
+
 PROMPTS_FILE = Path(__file__).parent.parent / "config" / "prompts.json"
 PROMPTS_DEFAULT = Path(__file__).parent.parent / "config" / "prompts.default.json"
 

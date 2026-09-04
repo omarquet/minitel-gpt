@@ -49,7 +49,7 @@ from minitel_gpt import (
     show_home, read_question, show_response,
     COLS,
     CR, LF, FF, RS, ESC, SEP, BS,
-    FG_CYAN, FG_WHITE,
+    FG_CYAN, FG_WHITE, FG_BLUE, FG_GREEN,
     SS3_MAP,
 )
 
@@ -278,8 +278,10 @@ def show_guide_ws(t):
         marker = " (active)" if k == active else ""
         t.line((f"{i}. {label}{marker}")[:COLS])
     t.w(bytes([CR, LF]))
-    t.w(FG_CYAN); t.center("Tapez un chiffre pour changer,")
-    t.center("une autre touche pour revenir")
+    # La destination est nommee : on ne revient pas dans la conversation en
+    # cours (l'appelant sort de sa boucle), on revient a l'accueil.
+    t.w(FG_CYAN); t.center("Tapez un chiffre pour changer")
+    t.center("SOMMAIRE pour revenir a l'accueil")
     t.w(bytes([CR, LF, CR, LF]))
     t.w(FG_WHITE)
     if ADMIN_URL:
@@ -288,6 +290,14 @@ def show_guide_ws(t):
             t.center(chunk)
 
     kind, code = t.read_key(60)
+    # Acces volontairement non annonce au choix du modele : SUITE. FNCT, la
+    # touche a laquelle on pense d'abord, est un modificateur - seule, elle
+    # n'emet rien sur la ligne serie, et "FNCT puis GUIDE" arrive ici comme un
+    # simple GUIDE. Une sequence de touches reellement emises est le seul
+    # equivalent qui marche sur tous les Minitels et dans l'emulateur.
+    if kind == 'fn' and code == mg.K_SUITE:
+        show_models_ws(t)
+        return
     if kind == 'char' and 0x31 <= code <= 0x39:   # '1'..'9'
         idx = code - 0x31
         if idx < len(keys) and keys[idx] != active:
@@ -298,6 +308,61 @@ def show_guide_ws(t):
             t.w(FG_CYAN); t.center("Personnalite activee :")
             t.center(data["presets"][keys[idx]].get("label", keys[idx]))
             time.sleep(1.5)
+
+
+# Fournisseurs proposes a la touche SUITE : lettre, identifiant, nom affiche,
+# champ de la cle et champ du modele dans llm_settings().
+GUIDE_PROVIDERS = (("A", "mistral", "MISTRAL", "mistral_key", "mistral_model"),
+                   ("B", "claude", "CLAUDE", "anthropic_key", "claude_model"),
+                   ("C", "gemini", "GEMINI", "gemini_key", "gemini_model"))
+
+
+def show_models_ws(t):
+    """Ecran de choix du fournisseur d'IA, atteint par SUITE depuis l'ecran
+    GUIDE. Un fournisseur sans cle est affiche mais inerte : le montrer dit a
+    quoi le terminal pourrait servir, le masquer laisserait croire qu'il
+    n'existe pas.
+
+    Le choix est ecrit dans config/llm.json, comme le fait l'admin, donc il
+    s'applique a la question suivante sans redemarrage (llm_settings est relu
+    a chaque appel)."""
+    s = mg.llm_settings()
+    t.clear()
+    t.w(bytes([CR, LF]))
+    t.w(FG_CYAN); t.center("=== MODELE D'IA ===")
+    t.w(bytes([CR, LF]))
+    for lettre, cle, nom, champ_cle, champ_modele in GUIDE_PROVIDERS:
+        if not s[champ_cle]:
+            # Pas de modele affiche sous une entree inutilisable : ce serait
+            # annoncer un modele qui ne repondra pas.
+            t.w(FG_BLUE); t.line(f"{lettre}. {nom} (sans config)")
+        else:
+            actif = s["provider"] == cle
+            t.w(FG_GREEN if actif else FG_WHITE)
+            t.line(f"{lettre}. {nom}" + (" (actif)" if actif else ""))
+            t.w(FG_BLUE); t.line(f"   {s[champ_modele]}")
+        t.w(bytes([CR, LF]))
+    t.w(FG_CYAN)
+    t.center("A, B ou C pour changer de modele")
+    t.center("SOMMAIRE pour revenir a l'accueil")
+
+    kind, code = t.read_key(60)
+    if kind != 'char':
+        return
+    lettre = chr(code).upper()
+    choix = next((p for p in GUIDE_PROVIDERS if p[0] == lettre), None)
+    if not choix:
+        return
+    _, cle, nom, champ_cle, _ = choix
+    t.clear()
+    if not s[champ_cle]:
+        t.w(FG_CYAN); t.center("Aucune clef pour"); t.center(nom)
+    elif cle != s["provider"]:
+        mg.write_llm_settings({"provider": cle})
+        t.w(FG_CYAN); t.center("Modele actif :"); t.center(nom)
+    else:
+        t.w(FG_CYAN); t.center("Deja actif :"); t.center(nom)
+    time.sleep(1.5)
 
 
 def run_session(t):

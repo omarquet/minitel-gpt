@@ -138,18 +138,9 @@ def load_knowledge_blob(key):
 # que le terminal ne relisait jamais - ni au demarrage, load_dotenv() ne
 # pouvant ecraser les variables fournies par docker-compose, ni apres, le
 # fichier etant perdu au redeploiement.
-def write_llm_settings(updates):
-    """Enregistre des reglages dans config/llm.json, en fusionnant avec
-    l'existant. Les valeurs vides sont ignorees : laisser le champ d'une cle
-    vide dans le formulaire ne doit pas effacer la cle enregistree.
-    Ecriture atomique : le fichier est relu a chaque question du Minitel, il
-    ne doit jamais etre lu a moitie ecrit."""
-    data = mg.read_llm_file()
-    data.update({k: v for k, v in updates.items() if v})
-    mg.LLM_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = mg.LLM_FILE.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(mg.LLM_FILE)
+# Le terminal ecrit lui aussi ce fichier (choix du modele a la touche SUITE) :
+# lecteur et redacteur vivent donc ensemble dans minitel_gpt.
+write_llm_settings = mg.write_llm_settings
 
 
 def mistral_key():
