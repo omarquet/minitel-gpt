@@ -168,6 +168,11 @@ HardwareSerial Minitel(1);
 // appuiera dessus. Assez long pour etre delibere, assez court pour qu'on ne
 // relache pas en croyant que ca ne marche pas.
 #define RESET_HOLD_MS 5000
+// Appui BREF sur le meme bouton : ouvre l'ecran de configuration sans attendre
+// le tour complet des reseaux connus. Demande a la main, pendant qu'on est
+// devant le Minitel, plutot que subie apres 36 s d'essais.
+#define RESET_TAP_MIN_MS 50
+static volatile bool setupRequested = false;
 
 // Reseau appris a l'ecran de configuration, garde en NVS. C'est lui qu'on
 // essaie EN PREMIER au demarrage : une fois configure sur place, le boitier
@@ -307,6 +312,12 @@ void checkResetButton() {
       ESP.restart();
     }
   } else {
+    // Relachement : un appui bref demande l'ecran de configuration, un appui
+    // long a deja fait son office (effacement + redemarrage) sans revenir ici.
+    if (downSince != 0 && millis() - downSince >= RESET_TAP_MIN_MS) {
+      setupRequested = true;
+      Serial.println("[BOOT] appui bref -> ecran de configuration WiFi");
+    }
     downSince = 0;
   }
 }
@@ -318,7 +329,9 @@ bool tryConnect(const char* ssid, const char* pass, unsigned long timeoutMs) {
   WiFi.disconnect();
   WiFi.begin(ssid, pass);
   unsigned long t0 = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - t0 < timeoutMs) idleTick();
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < timeoutMs && !setupRequested) {
+    idleTick();
+  }
   if (WiFi.status() != WL_CONNECTED) return false;
   usedSsid = ssid; usedPass = pass;
   return true;
@@ -347,7 +360,20 @@ const char* stars(int8_t rssi) {
 // signal - les reseaux utilisables se retrouvent donc en page 1.
 void scanNets() {
   netCount = 0;
+  // Un scan lance alors qu'une tentative de connexion est encore en cours
+  // renvoie un code NEGATIF (refuse), la boucle ci-dessous ne tourne pas et la
+  // liste ressort vide : c'est ce qui faisait boucler le demarrage sans jamais
+  // afficher l'ecran. On remet donc la radio au repos avant de scanner.
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_STA);
+  delay(200);
   int n = WiFi.scanNetworks();
+  if (n < 0) {                                 // deuxieme chance, un peu plus tard
+    Serial.printf("[WiFi] scan refuse (%d), nouvelle tentative\n", n);
+    delay(500);
+    n = WiFi.scanNetworks();
+  }
+  if (n < 0) n = 0;
   for (int i = 0; i < n; i++) {
     String ssid = WiFi.SSID(i);
     if (!ssid.length()) continue;                        // reseau cache
@@ -388,8 +414,14 @@ void showList(uint8_t page, uint8_t pages) {
   mnClear();
   mnLine(); mnLine("   MINITEL GPT - RESEAU WIFI"); mnLine();
   if (pages > 1) snprintf(buf, sizeof buf, "%u reseaux  -  page %u/%u", netCount, page + 1, pages);
-  else           snprintf(buf, sizeof buf, "%u reseaux", netCount);
+  else           snprintf(buf, sizeof buf, "%u reseau%s", netCount, netCount > 1 ? "x" : "");
   mnLine(buf); mnLine();
+  if (!netCount) {
+    mnLine("Aucun reseau detecte.");
+    mnLine("Approchez le Minitel d'une box,");
+    mnLine("ou activez un partage de connexion.");
+    mnLine();
+  }
   for (uint8_t i = 0; i < PER_PAGE; i++) {
     uint8_t k = page * PER_PAGE + i;
     if (k >= netCount) break;
@@ -443,10 +475,14 @@ bool askPassword(const String& ssid, String& out) {
 // reseaux connus, pour qu'un boitier allume sans Minitel ne reste pas plante
 // devant un menu que personne ne lit.
 bool wifiSetupOnMinitel() {
+  setupRequested = false;
   scanNets();
-  if (!netCount) return false;
+  // Meme sans un seul reseau detecte, on AFFICHE l'ecran : partir en silence,
+  // c'etait laisser le visiteur devant un boitier qui clignote sans rien dire.
+  // "R" relance la recherche, et le tour des reseaux connus reprend tout seul
+  // au bout de SETUP_IDLE_MS.
   uint8_t page = 0;
-  uint8_t pages = (netCount + PER_PAGE - 1) / PER_PAGE;
+  uint8_t pages = netCount ? (netCount + PER_PAGE - 1) / PER_PAGE : 1;
   showList(page, pages);
   unsigned long last = millis();
   while (millis() - last < SETUP_IDLE_MS) {
@@ -548,7 +584,12 @@ void setup() {
   // liste de secrets.h. Si rien ne repond, on demande au visiteur sur l'ecran
   // du Minitel - et s'il ne repond pas, on refait un tour tout seul : le
   // boitier peut tres bien etre allume avant la box, ou sans Minitel branche.
-  while (!connectSaved() && !connectKnown()) {
+  while (true) {
+    if (setupRequested) {                     // appui bref sur BOOT : on ouvre
+      if (wifiSetupOnMinitel()) break;        // l'ecran sans finir le tour
+      continue;
+    }
+    if (connectSaved() || connectKnown()) break;
     Serial.println("[WiFi] aucun reseau connu n'a repondu -> configuration");
     if (wifiSetupOnMinitel()) break;
   }
@@ -576,6 +617,12 @@ void loop() {
   webSocket.loop();
   updateStatusLed();
   checkResetButton();                         // apres la LED : l'appui la fige
+  // Appui bref alors que tout va bien : sans effet, mais on l'oublie pour
+  // qu'il ne surgisse pas au prochain passage par la configuration.
+  if (setupRequested) {
+    setupRequested = false;
+    Serial.println("[BOOT] appui bref ignore : deja connecte");
+  }
 
 #if DEBUG_UART >= 2
   // Emission periodique du motif de test : donne un signal permanent a sonder
