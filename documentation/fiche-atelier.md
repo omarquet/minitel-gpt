@@ -105,10 +105,11 @@ abaisseur - c'est l'objet du §4.
 
 # 3. Câblage : trois variantes
 
-Les trois fonctionnent. La **A** est le montage historique, validé sur ce Minitel. La **B** est plus
-simple, plus prévisible, et supprime deux défauts de la A. La **C** est la plus légère : une seule
+La **A** est le montage historique, validé sur ce Minitel. La **C** est la plus légère : une seule
 résistance, qui colle à la nature réelle de la ligne TX du Minitel - une sortie collecteur ouvert
-documentée comme telle par la norme STUM1B, et non une sortie poussée activement à 5 V.
+documentée comme telle par la norme STUM1B, et non une sortie poussée activement à 5 V. La **B**,
+gardée ici pour mémoire, part d'un présupposé qui ne tient pas pour cette ligne : voir l'encadré
+dans sa section.
 
 ## Variante A · TXS0108E
 
@@ -147,68 +148,30 @@ dans l'ordre inverse.** Une diode Schottky (BAT54, 1N5817) entre la broche `5V` 
 retour et rend l'ordre indifférent, au prix de 0,25 V sur VB.
 :::
 
-## Variante B · deux résistances
-
-La liaison montante est **unidirectionnelle** : c'est toujours le Minitel qui pousse le signal vers
-l'ESP32. Un pont diviseur suffit donc - et un pont ne sait qu'abaisser une tension, ce qui est
-exactement ce qu'on demande ici.
+## Variante B · pont diviseur (ne fonctionne pas telle quelle)
 
 ```
    DIN br. 3  (TX Minitel, 5 V, fil ROUGE)
         |
      [ 10k ]
         |
-        +-------------------------------> GPIO4  (RX ESP32)      M = 3,33 V
+        +-------------------------------> GPIO4  (RX ESP32)      M visé : 3,33 V
         |
      [ 20k ]
         |
        GND  (DIN br. 2, masse commune, fil CUIVRE)
-
-
-   GPIO5  (TX ESP32, 3,3 V) --------------> DIN br. 1 (NOIR)   liaison DIRECTE
 ```
 
-Le point milieu M vaut `5 × 20 / (10 + 20) = 3,33 V` quand la ligne est haute, 0 V quand elle est
-basse. Si vous n'avez que des 10 k, **deux en série font le 20 k**. Placer le pont **près de
-l'ESP32** : le long fil est ainsi attaqué par la sortie basse impédance du Minitel.
-
-### Choix des valeurs
-
-| R haut | R bas | V sortie | Courant au repos | τ à 100 pF |
-|---|---|---|---|---|
-| 1 k | 2 k | 3,33 V | 1667 µA | 0,07 µs |
-| 4,7 k | 10 k | 3,40 V | 340 µA | 0,32 µs |
-| **10 k** | **20 k** | **3,33 V** | **167 µA** | **0,67 µs** |
-| 22 k | 47 k | 3,41 V | 72 µA | 1,50 µs |
-
-Trop bas, on gaspille du courant ; trop haut, la ligne devient molle et sensible au bruit.
-**10 k / 20 k** est le bon compromis. La vitesse n'est pas un sujet : un bit à 1200 bauds dure
-**833 µs** quand la constante de temps du pont est de 0,67 µs, soit un facteur 1250. C'est parce
-que le Minitel est lent que cette solution rustique est ici parfaitement propre.
-
-### Ce que la variante B règle
-
-ESP32 éteint, ligne toujours à 5 V, le courant qui peut entrer dans la carte est fixé par la
-résistance de 10 k :
-
-| Tension du rail 3,3 V | Courant injecté |
-|---|---|
-| 0 V | 410 µA |
-| 0,5 V | 335 µA |
-| 1,0 V | 260 µA |
-
-Quelques centaines de microampères au maximum. La LED d'alimentation de la carte en consomme à elle
-seule plusieurs milliampères : **le rail ne peut pas monter**. Avec le TXS0108E, à l'inverse, ce
-courant ne traverse qu'une diode interne, sans autre limite que ce que débite le Minitel. La règle
-« USB d'abord » disparaît donc avec la variante B.
-
-::: note
-**Le seul point à vérifier :** que le Minitel lise bien 3,3 V comme un niveau haut sur la broche 1,
-en liaison directe. C'est le cas de la plupart des entrées TTL, dont le seuil est vers 2,0 à 2,4 V,
-mais cela se teste (§5, test 6). **Si ça ne passe pas**, ne revenez pas au TXS0108E : un **74HCT125**
-alimenté en 5 V fait ce sens proprement, ses entrées HCT considérant 3,3 V comme un niveau haut
-franc. Un boîtier, un sens fixe, aucune détection automatique à perturber - et le pont diviseur
-reste pour le sens montant.
+::: danger
+**Un pont diviseur abaisse une tension réellement appliquée - il n'y en a pas ici.** La broche 3 du
+Minitel est une sortie **collecteur ouvert** (norme STUM1B, cf. variante C) : elle tire vers la
+masse au niveau bas, et **flotte** au repos - elle ne pousse jamais 5 V vers le haut. Rien n'alimente
+donc le haut de la résistance de 10 k : la résistance de 20 k vers la masse, elle, n'a rien en face
+et tire le point M vers 0 V au lieu des 3,33 V calculés. Le ≈5,0 V relevé un temps au Test 4 venait
+très probablement d'autre chose branché en même temps (le réseau de détection de sens du TXS0108E,
+variante A), pas de la ligne TX elle-même - mesurée seule, elle flotte, et ce montage ne fait pas
+remonter de données. **Utiliser la variante C** : un pull-up, pas un diviseur, est la bonne façon
+d'interfacer une sortie collecteur ouvert.
 :::
 
 ## Variante C · pull-up simple (collecteur ouvert confirmé)
@@ -237,20 +200,24 @@ puisque rien ne pousse la ligne à 5 V.
 relié en direct (aucun second composant vers la masse). Test 6 (transmission montante) passé sans
 corruption.
 
-Choix de la valeur : 10 k est le compromis déjà retenu pour la variante B (ni trop de courant
-gaspillé, ni ligne trop molle), et c'est ce qu'on a déjà sous la main. Le sens descendant (`GPIO5`
-vers broche 1) est identique à la variante B : liaison directe, le 3,3 V est accepté sans souci par
-l'entrée TTL du Minitel.
+Choix de la valeur : 10 k, ni trop de courant gaspillé, ni ligne trop molle - et c'est ce qu'on a
+déjà sous la main. Le sens descendant (`GPIO5` vers broche 1) est une liaison directe : le 3,3 V est
+accepté sans souci par la plupart des entrées TTL, dont le seuil est vers 2,0 à 2,4 V, mais cela se
+vérifie (§5, test 6). **Si ça ne passe pas**, un **74HCT125** alimenté en 5 V fait ce sens proprement,
+ses entrées HCT considérant 3,3 V comme un niveau haut franc.
 
 ## Choisir
 
-| | A · TXS0108E | B · résistances | C · pull-up simple |
-|---|---|---|---|
-| Composants | 1 circuit intégré, plaque à cheval | 2 résistances | 1 résistance |
-| Retour de courant, ESP32 éteint | Non limité | ≤ 410 µA | Non mesuré |
-| Ordre de branchement | USB d'abord, impérativement | Indifférent | Indifférent (a priori, comme B) |
-| Sensibilité aux fils longs | Élevée (détection de sens) | Faible | Faible |
-| Point d'incertitude | Aucun, montage validé | Seuil d'entrée du Minitel à 3,3 V | Aucun, mesuré sur ce Minitel |
+| | A · TXS0108E | C · pull-up simple |
+|---|---|---|
+| Composants | 1 circuit intégré, plaque à cheval | 1 résistance |
+| Retour de courant, ESP32 éteint | Non limité | Non mesuré |
+| Ordre de branchement | USB d'abord, impérativement | Indifférent (a priori) |
+| Sensibilité aux fils longs | Élevée (détection de sens) | Faible |
+| Point d'incertitude | Aucun, montage validé | Aucun, mesuré sur ce Minitel |
+
+La variante B (pont diviseur) n'apparaît pas dans ce tableau : voir l'encadré de sa section, elle ne
+fonctionne pas sur cette ligne.
 
 # 4. Alimenter l'ESP32 par le Minitel
 
@@ -272,10 +239,11 @@ délivre **12 V** : il faut donc un abaisseur, **réglé avant tout branchement*
                      |
                      |                                        GPIO4  (RX)
                      |                                           ^
-   br.3  ROUGE 5 V --+---[ 10k ]---+---------------------------+
-                     |             |
-                     |          [ 20k ]
-                     +-------------+
+   br.3  ROUGE  -----+------------------------------------------+
+                                                                  |
+                                                               [ 10k ]
+                                                                  |
+                                                    3V3 de l'ESP32 (sortie du buck, via son propre régulateur)
 
 
    br.1  NOIR  <-------------------------------------------  GPIO5  (TX)
@@ -296,12 +264,13 @@ ne bouge donc pas au premier quart de tour - continuer en surveillant le voltmè
 forcer.
 
 Le montage complet, alimenté par le seul Minitel : plus d'USB, plus de rail 5 V venant d'ailleurs.
-La masse est le fil qui relie tout - broche 2, entrée et sortie du buck, base du pont diviseur et
-`GND` de l'ESP32 - et c'est le premier à brancher, le dernier à débrancher.
+La masse est le fil qui relie tout - broche 2, entrée et sortie du buck, et `GND` de l'ESP32 - et
+c'est le premier à brancher, le dernier à débrancher.
 
-Le schéma reprend la **variante B** du §3. Avec la variante A, le `VB` du TXS0108E se prend sur le
-même rail 5 V que l'ESP32, en sortie du buck : dans ce montage autonome, la règle « USB d'abord »
-n'a plus d'objet, puisqu'il n'y a plus d'USB.
+Le schéma reprend la **variante C** du §3 : la résistance de 10 k tire son pull-up du rail 3,3 V de
+l'ESP32 (alimenté ici par le buck plutôt que par l'USB), pas d'un pont vers la masse. Avec la
+variante A, le `VB` du TXS0108E se prend sur le même rail 5 V que l'ESP32, en sortie du buck : dans
+ce montage autonome, la règle « USB d'abord » n'a plus d'objet, puisqu'il n'y a plus d'USB.
 
 ## Procédure, dans cet ordre
 
@@ -370,14 +339,13 @@ En mode continuité. Une pointe sur la broche 2, l'autre sur le blindage métall
 Continuité attendue (bip, ou ≈ 0 Ω). **Ce test valide tout le repérage du connecteur : à faire en
 premier**, avant toute mise sous tension.
 
-## Test 2 · Le pont diviseur, hors tension
+## Test 2 · Le pull-up, hors tension
 
-En ohmmètre, pont câblé mais `GPIO4` pas encore relié :
+En ohmmètre, ESP32 éteint, résistance câblée mais fil DIN 3 pas encore relié :
 
 | Entre | Attendu |
 |---|---|
-| Fil DIN 3 et masse | 30 kΩ |
-| Point milieu M et masse | 20 kΩ |
+| Point M et `3V3` de l'ESP32 | 10 kΩ |
 
 ## Test 3 · La broche 5 débite-t-elle ? — Minitel allumé
 
@@ -394,43 +362,43 @@ tension s'effondre, la broche ne débite pas assez. Si elle tient, c'est une vra
 
 **La broche 4 (fil jaune) affiche elle aussi 5 V** sur ce Minitel. Le même test de charge dirait
 s'il s'agit d'une source ou d'une simple résistance de tirage, mais la question est théorique : le
-montage n'en a pas besoin - la variante B ne demande aucun 5 V, et la variante A prend le sien sur
+montage n'en a pas besoin - la variante C ne demande aucun 5 V, et la variante A prend le sien sur
 le rail de l'ESP32. On l'isole, on n'y touche pas.
 
 ## Test 4 · La ligne de données — Minitel allumé, en mode péri-informatique
 
 | Point | Attendu |
 |---|---|
-| Broche 3 (TX Minitel) | ≈ 5,0 V |
-| Point milieu M du pont | 3,33 V |
+| Broche 3 (TX Minitel), fil seul, rien branché dessus | flotte, lecture instable |
+| Point M (variante C, pull-up en place) | ≈ 3,3 V |
 
-Une ligne série au repos est au niveau haut : la lecture doit être stable, et bouger légèrement à la
-frappe. Le multimètre ne fausse rien : avec ses 10 MΩ d'entrée face aux 6,7 kΩ du pont, l'erreur est
-de **0,07 %**. Seul un vieil appareil à aiguille (20 kΩ/V) fausserait la lecture, de 25 %.
+Une ligne série au repos est au niveau haut : en variante C, la lecture doit être stable autour de
+3,3 V, et bouger légèrement à la frappe. Le multimètre ne fausse rien : avec ses 10 MΩ d'entrée face
+aux 10 kΩ du pull-up, l'erreur est négligeable.
 
 | Si M lit | Cause |
 |---|---|
-| 5,00 V | La 20 k ne touche pas la masse |
-| 1,67 V | Les deux résistances sont inversées |
-| 0,00 V | La 10 k ne touche pas la broche 3, ou le Minitel est éteint |
+| ≈ 3,3 V, stable | Conforme |
+| 0 V fixe | Résistance absente ou non reliée au `3V3`, ou TX resté bas (mode péri-informatique pas activé : `Fnct`+`T` puis `A`) |
+| Tension instable ou intermédiaire | Continuité douteuse sur le fil DIN 3, ou broche 3 mal identifiée |
 
-## Test 5 · Le retour de courant — le test qui valide la variante B
+## Test 5 · Le retour de courant
 
 **Débrancher l'USB, laisser le DIN branché**, et mesurer la broche `3V3` de l'ESP32 contre la masse.
 
 | Montage | Lecture | LED d'alimentation |
 |---|---|---|
 | Variante A, sans diode | plusieurs volts | faiblement allumée |
-| Variante B | quelques dizaines de mV | éteinte |
+| Variante C | non mesuré | non mesuré |
 
 ## Test 6 · Fonctionnel, sans multimètre
 
 Mettre `DEBUG_UART` à `1` dans le `.ino`, flasher, et regarder :
 
-- **`TEST ESP32 OK` s'affiche sur le Minitel au démarrage** : le sens descendant est bon - et en
-  variante B, cela valide que le Minitel accepte les 3,3 V.
-- **`[RX] 0x..` défile sur le moniteur série à la frappe** : le sens montant est bon, donc le pont
-  diviseur aussi.
+- **`TEST ESP32 OK` s'affiche sur le Minitel au démarrage** : le sens descendant est bon - et cela
+  valide que le Minitel accepte les 3,3 V en direct.
+- **`[RX] 0x..` défile sur le moniteur série à la frappe** : le sens montant est bon, donc le pull-up
+  aussi.
 
 Remettre `DEBUG_UART` à `0` ensuite.
 
@@ -510,8 +478,8 @@ Logique inversée : `LOW` = allumée.
 | Rien ne s'affiche, rien ne remonte | Variante A : OE non relié à VA. Sinon : masse commune absente, ou Minitel pas en mode péri-informatique (`Fnct`+`T` puis `A`) |
 | Ça reçoit mais n'émet pas, ou l'inverse | TX et RX inversés : intervertir broches 1 et 3 |
 | Chaque caractère s'affiche en double | Écho local actif : `Fnct`+`T` puis `E` |
-| Caractères corrompus ou aléatoires | Vitesse ou format (attendu 1200 7E1) ; fils trop longs. Le TXS0108E supporte mal les lignes capacitives, le pont diviseur est plus prévisible |
-| LED d'alimentation faiblement allumée, USB débranché | Retour de courant par la ligne de données. Diode Schottky sur VB, ou passage en variante B |
+| Caractères corrompus ou aléatoires | Vitesse ou format (attendu 1200 7E1) ; fils trop longs. Le TXS0108E supporte mal les lignes capacitives, le pull-up simple (variante C) est plus prévisible |
+| LED d'alimentation faiblement allumée, USB débranché | Retour de courant par la ligne de données. Diode Schottky sur VB, ou passage en variante C |
 | L'ESP32 redémarre en boucle | Le moniteur série annonce `BROWNOUT` : alimentation insuffisante lors des pics WiFi. 100 à 220 µF plus 10 µF céramique au ras des broches `5V` et `GND` (§4) |
 | `[WS] connecte` puis `deconnecte` en boucle | Jeton absent ou faux : le serveur ferme en silence. Vérifier `WS_TOKEN_ENC`, URL-encodé |
 | Boucle de scan WiFi sans jamais d'écran | Firmware antérieur à septembre 2026 : le scan lancé pendant une tentative de connexion était refusé. Mettre à jour |
