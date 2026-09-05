@@ -47,7 +47,7 @@ Minitel reliée directement à une entrée détruit la broche. Le sens inverse, 
                        ( 2 )              br. 1  NOIR    RX Minitel   <- GPIO5
                                           br. 2  CUIVRE  masse, 0 V
              ( 5 )             ( 4 )      br. 3  ROUGE   TX Minitel   -> GPIO4, 5 V
-                                          br. 4  JAUNE   handshake, non utilise
+                                          br. 4  JAUNE   handshake, 5 V MESURES
           ( 3 )                   ( 1 )   br. 5  BLANC   12 V MESURES, danger
 
                   \___________/
@@ -70,8 +70,18 @@ Les câbles DIN 5 broches vendus tout faits suivent presque tous la même conven
 | Noir | 1 | RX Minitel, reçoit du `GPIO5` |
 | Cuivre nu ou tresse | 2 | Masse |
 | Rouge | 3 | TX Minitel, 5 V, part vers `GPIO4` |
-| Jaune | 4 | Handshake, non utilisé - à isoler |
+| Jaune | 4 | Handshake (« PT »), **5 V mesurés** - à isoler, jamais à la masse |
 | Blanc | 5 | **12 V, à isoler** sauf montage du §4 |
+
+::: danger
+**Les deux fils à isoler, et pourquoi on ne les met pas à la masse.** Le blanc (broche 5) porte
+12 V, le jaune (broche 4) porte **5 V mesurés** : ce sont deux sorties, pas deux fils morts. Mettre
+une broche inutilisée à la masse est le bon réflexe pour une entrée d'un circuit qu'on maîtrise ;
+ici, ce serait faire débiter l'appareil dans un court-circuit. Et rien ne lit ces fils du côté
+ESP32, donc rien ne « flotte » dans un sens gênant. **Couper court, gainer, rabattre le long du
+câble** : le seul risque réel est qu'une extrémité nue touche une piste - le fil blanc et ses 12 V
+étant le voisin à craindre.
+:::
 
 ::: danger
 **Cette convention n'est pas une norme.** Elle est très répandue, elle n'est pas garantie : une
@@ -348,6 +358,11 @@ Noire sur broche 2, rouge sur broche 5.
 
 **Test de charge complémentaire :** brancher 1 kΩ entre broche 5 et masse tout en mesurant. Si la
 tension s'effondre, la broche ne débite pas assez. Si elle tient, c'est une vraie source.
+
+**La broche 4 (fil jaune) affiche elle aussi 5 V** sur ce Minitel. Le même test de charge dirait
+s'il s'agit d'une source ou d'une simple résistance de tirage, mais la question est théorique : le
+montage n'en a pas besoin - la variante B ne demande aucun 5 V, et la variante A prend le sien sur
+le rail de l'ESP32. On l'isole, on n'y touche pas.
 
 ## Test 4 · La ligne de données — Minitel allumé, en mode péri-informatique
 
