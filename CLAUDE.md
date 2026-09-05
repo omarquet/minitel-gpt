@@ -85,6 +85,12 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   l'appareil étant fait pour passer de main en main. Un 403 le fait oublier,
   sinon il rejouerait le refus à chaque ouverture. Bouton « Oublier le jeton ».
 - `DEPLOY.md` — guide de déploiement pas à pas.
+- `documentation/fiche-atelier.md` — fiche d'atelier du montage électronique
+  (brochage DIN, les deux variantes de câblage TXS0108E ou pont diviseur,
+  alimentation par le Minitel, tests au multimètre). **La source à maintenir
+  est le `.md`** ; `build-fiche.sh` en régénère `fiche-atelier.pdf` pour
+  l'impression, via pandoc puis Chrome en mode headless (pas de LaTeX, pas de
+  police à télécharger : la génération marche hors ligne).
 
 ## Points techniques importants / pièges
 
