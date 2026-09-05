@@ -44,11 +44,11 @@ Minitel reliée directement à une entrée détruit la broche. Le sens inverse, 
         vue cote BROCHES de la fiche MALE du cable
                 (celle que vous tenez en main)
 
-                       ( 2 )                     br. 1  RX Minitel   <- GPIO5
-                                                 br. 2  masse, 0 V
-             ( 5 )             ( 4 )             br. 3  TX Minitel   -> GPIO4, 5 V
-                                                 br. 4  handshake, non utilise
-          ( 3 )                   ( 1 )          br. 5  12 V MESURES, danger
+                       ( 2 )              br. 1  NOIR    RX Minitel   <- GPIO5
+                                          br. 2  CUIVRE  masse, 0 V
+             ( 5 )             ( 4 )      br. 3  ROUGE   TX Minitel   -> GPIO4, 5 V
+                                          br. 4  JAUNE   handshake, non utilise
+          ( 3 )                   ( 1 )   br. 5  BLANC   12 V MESURES, danger
 
                   \___________/
                    detrompeur
@@ -61,8 +61,29 @@ la languette métallique du blindage - se place **en bas**, et les broches se li
 4 - 1 de gauche à droite. La prise du Minitel, vue de face, en est l'image miroir (1 - 4 - 2 - 5 - 3),
 mais on ne la voit jamais : elle est à l'arrière de l'appareil.
 
-Les numéros sont parfois moulés en minuscule dans le plastique de la fiche. Dans le doute, ne pas
-deviner : **vérifier en continuité** (§5, test 1), la broche 2 étant reliée au blindage.
+## Couleurs des fils
+
+Les câbles DIN 5 broches vendus tout faits suivent presque tous la même convention :
+
+| Fil | Broche | Rôle |
+|---|---|---|
+| Noir | 1 | RX Minitel, reçoit du `GPIO5` |
+| Cuivre nu ou tresse | 2 | Masse |
+| Rouge | 3 | TX Minitel, 5 V, part vers `GPIO4` |
+| Jaune | 4 | Handshake, non utilisé - à isoler |
+| Blanc | 5 | **12 V, à isoler** sauf montage du §4 |
+
+::: danger
+**Cette convention n'est pas une norme.** Elle est très répandue, elle n'est pas garantie : une
+série peut inverser deux couleurs sans prévenir. Or se tromper ici, c'est amener les 12 V du fil
+blanc sur un GPIO. Les couleurs servent donc à **s'orienter**, pas à conclure. Deux vérifications
+suffisent, et elles prennent une minute : la **continuité** entre le fil cuivre et le blindage de
+la fiche (§5, test 1), puis le **voltmètre sur le fil blanc**, Minitel allumé, qui doit afficher
+12 V (§5, test 3). Si ces deux-là tombent juste, les trois autres suivent.
+:::
+
+Les numéros sont parfois moulés en minuscule dans le plastique de la fiche, ce qui permet de
+confirmer sans démonter.
 
 ::: danger
 **Broche 5 : 12 V mesurés sur ce Minitel 2 Alcatel.** Ce n'est plus une inconnue, c'est un résultat
@@ -85,9 +106,9 @@ simple, plus prévisible, et supprime deux défauts de la A.
 
    3V3  ------------------>  VA , OE
    5V   ------------------>  VB   <........................ retour parasite
-   GND  ------------------>  GND  ----------------------->  br. 2  masse
-   GPIO5 (TX) ----------->  A1 <-> B1  ------------------>  br. 1  RX Minitel
-   GPIO4 (RX) <-----------  A2 <-> B2  <------------------  br. 3  TX Minitel, 5 V
+   GND  ------------------>  GND  ----------------------->  br. 2  masse   (cuivre)
+   GPIO5 (TX) ----------->  A1 <-> B1  ------------------>  br. 1  RX      (noir)
+   GPIO4 (RX) <-----------  A2 <-> B2  <------------------  br. 3  TX, 5 V (rouge)
 
             cote A = 3,3 V (ESP32)   |   cote B = 5 V (Minitel)
 ```
@@ -121,7 +142,7 @@ l'ESP32. Un pont diviseur suffit donc - et un pont ne sait qu'abaisser une tensi
 exactement ce qu'on demande ici.
 
 ```
-   DIN br. 3  (TX Minitel, 5 V)
+   DIN br. 3  (TX Minitel, 5 V, fil ROUGE)
         |
      [ 10k ]
         |
@@ -129,10 +150,10 @@ exactement ce qu'on demande ici.
         |
      [ 20k ]
         |
-       GND  (DIN br. 2, masse commune)
+       GND  (DIN br. 2, masse commune, fil CUIVRE)
 
 
-   GPIO5  (TX ESP32, 3,3 V) --------------> DIN br. 1   liaison DIRECTE, aucun composant
+   GPIO5  (TX ESP32, 3,3 V) --------------> DIN br. 1 (NOIR)   liaison DIRECTE
 ```
 
 Le point milieu M vaut `5 × 20 / (10 + 20) = 3,33 V` quand la ligne est haute, 0 V quand elle est
@@ -194,28 +215,28 @@ Objectif : se passer de l'USB, pour que l'ensemble démarre en branchant le seul
 délivre **12 V** : il faut donc un abaisseur, **réglé avant tout branchement**.
 
 ```
-   fiche DIN                    MP1584EN                        ESP32-C3
-   (cote broches)          4 pastilles, 2 par bord           (USB DEBRANCHE)
+   fiche DIN                   MP1584EN                      ESP32-C3
+   (cote broches)         4 pastilles, 2 par bord         (USB DEBRANCHE)
 
-                        +---------------------------+
-   br. 5   12 V  -----> | IN+                  OUT+ | ------------>  5V  ---+
-                        |                           |                       |
-                        |      (o) VR : reglage     |                 [ 100-220 uF ]
-                        |                           |                       |  optionnel
-   br. 2   masse ---+-> | IN-                  OUT- | ------------>  GND ---+
-                    |   +---------------------------+                 |
-                    +------------- masse commune ---------------------+
-                    |
-                    |                                             GPIO4  (RX)
-                    |                                                ^
-   br. 3   TX 5 V --|-------[ 10k ]-----+---------------------------+
-                    |                   |
-                    |                [ 20k ]
-                    +-------------------+
+                         +--------------------------+
+   br.5  BLANC  12 V --> | IN+                 OUT+ | ----------->  5V  --+
+                         |                          |                     |
+                         |     (o) VR : reglage     |               [ 100-220 uF ]
+                         |                          |                     |  optionnel
+   br.2  CUIVRE  ----+-> | IN-                 OUT- | ----------->  GND --+
+                     |   +--------------------------+                     |
+                     +---------- masse commune ---------------------------+
+                     |
+                     |                                        GPIO4  (RX)
+                     |                                           ^
+   br.3  ROUGE 5 V --+---[ 10k ]---+---------------------------+
+                     |             |
+                     |          [ 20k ]
+                     +-------------+
 
 
-   br. 1   RX  <------------------------------------------------  GPIO5  (TX)
-                            liaison directe, 3,3 V
+   br.1  NOIR  <-------------------------------------------  GPIO5  (TX)
+                         liaison directe, 3,3 V
 ```
 
 | Pastille du module | Nom alternatif sur certaines séries | Reliée à |
