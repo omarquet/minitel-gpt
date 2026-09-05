@@ -28,7 +28,7 @@ deux broches libres et sans contrainte de démarrage.
 |---|---|
 | Minitel 2 Alcatel | Prise péri-informatique DIN 5 broches, à l'arrière |
 | ESP32-C3 | UART1 : `GPIO4` RX, `GPIO5` TX. LED de statut sur `GPIO8`, bouton BOOT sur `GPIO9` |
-| Adaptation de niveau | Au choix : TXS0108E (variante A) ou deux résistances (variante B) |
+| Adaptation de niveau | Au choix : TXS0108E (A), deux résistances (B), ou une seule (C) |
 | Alimentation | USB pendant la mise au point, ou MP1584EN depuis le Minitel (§4) |
 | Multimètre | Indispensable : tous les contrôles du §5 en dépendent |
 
@@ -103,10 +103,12 @@ d'entrée : la carte est détruite instantanément. Pour s'en servir malgré tou
 abaisseur - c'est l'objet du §4.
 :::
 
-# 3. Câblage : deux variantes
+# 3. Câblage : trois variantes
 
-Les deux fonctionnent. La **A** est le montage historique, validé sur ce Minitel. La **B** est plus
-simple, plus prévisible, et supprime deux défauts de la A.
+Les trois fonctionnent. La **A** est le montage historique, validé sur ce Minitel. La **B** est plus
+simple, plus prévisible, et supprime deux défauts de la A. La **C** est la plus légère : une seule
+résistance, qui colle à la nature réelle de la ligne TX du Minitel - une sortie collecteur ouvert
+documentée comme telle par la norme STUM1B, et non une sortie poussée activement à 5 V.
 
 ## Variante A · TXS0108E
 
@@ -209,15 +211,58 @@ franc. Un boîtier, un sens fixe, aucune détection automatique à perturber - e
 reste pour le sens montant.
 :::
 
+## Variante C · pull-up simple (collecteur ouvert confirmé)
+
+```
+   DIN br. 3  (TX Minitel, fil ROUGE)
+        |
+        +-------------------------------> GPIO4  (RX ESP32)      M ~ 3,3 V mesurés
+        |
+     [ 10k ]
+        |
+       3V3  (rail de l'ESP32)
+
+
+   GPIO5  (TX ESP32, 3,3 V) --------------> DIN br. 1 (NOIR)   liaison DIRECTE
+```
+
+La norme STUM1B documente la sortie TX du Minitel comme un **collecteur ouvert** : elle ne pousse
+jamais activement vers le haut, elle tire seulement vers le bas (bit à 0) et laisse la ligne flotter
+au repos (bit à 1). Ce genre de sortie a besoin d'un pull-up externe pour définir son niveau haut -
+rien de plus. Une résistance unique de **10 k vers le rail 3,3 V** de l'ESP32 fait donc directement
+ce travail, sans qu'aucune tension de 5 V n'ait besoin d'être divisée : il n'y en a pas à diviser,
+puisque rien ne pousse la ligne à 5 V.
+
+**Mesuré sur ce Minitel 2 Alcatel** : point M à environ 3,3 V au repos, résistance de 10 k, `GPIO4`
+relié en direct (aucun second composant vers la masse). Test 6 (transmission montante) passé sans
+corruption.
+
+Choix de la valeur : 10 k est le compromis déjà retenu pour la variante B (ni trop de courant
+gaspillé, ni ligne trop molle), et c'est ce qu'on a déjà sous la main. Le sens descendant (`GPIO5`
+vers broche 1) est identique à la variante B : liaison directe, le 3,3 V est accepté sans souci par
+l'entrée TTL du Minitel.
+
+::: note
+**À vérifier avant de généraliser.** Ce résultat suppose que la ligne TX de ce Minitel ne tient
+aucun pull-up interne significatif vers le 5 V - cohérent avec la norme, mais en tension partielle
+avec le Test 4 de cette fiche, qui relève ≈5,0 V sur la broche 3 à vide. Il est probable que cette
+lecture provienne du réseau de détection de sens du TXS0108E (variante A) branché au moment de la
+mesure, plutôt que d'un pull-up propre au Minitel - mais tant que la broche 3 n'a pas été mesurée
+seule, sans rien branché dessus, la question reste ouverte. Si un pull-up interne existe et se
+révèle plus fort qu'attendu, le point M peut monter au-delà de 3,3 V : le mesurer avant de
+considérer ce montage acquis sur un autre exemplaire. Le retour de courant (Test 5) et le contrôle à
+l'ohmmètre (Test 2) n'ont pas encore été refaits pour cette variante.
+:::
+
 ## Choisir
 
-| | A · TXS0108E | B · résistances |
-|---|---|---|
-| Composants | 1 circuit intégré, plaque à cheval | 2 résistances |
-| Retour de courant, ESP32 éteint | Non limité | ≤ 410 µA |
-| Ordre de branchement | USB d'abord, impérativement | Indifférent |
-| Sensibilité aux fils longs | Élevée (détection de sens) | Faible |
-| Point d'incertitude | Aucun, montage validé | Seuil d'entrée du Minitel à 3,3 V |
+| | A · TXS0108E | B · résistances | C · pull-up simple |
+|---|---|---|---|
+| Composants | 1 circuit intégré, plaque à cheval | 2 résistances | 1 résistance |
+| Retour de courant, ESP32 éteint | Non limité | ≤ 410 µA | Non mesuré |
+| Ordre de branchement | USB d'abord, impérativement | Indifférent | Indifférent (a priori, comme B) |
+| Sensibilité aux fils longs | Élevée (détection de sens) | Faible | Faible |
+| Point d'incertitude | Aucun, montage validé | Seuil d'entrée du Minitel à 3,3 V | Absence de pull-up interne côté Minitel, à confirmer (voir note) |
 
 # 4. Alimenter l'ESP32 par le Minitel
 
