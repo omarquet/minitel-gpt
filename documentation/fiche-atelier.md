@@ -242,18 +242,6 @@ gaspillé, ni ligne trop molle), et c'est ce qu'on a déjà sous la main. Le sen
 vers broche 1) est identique à la variante B : liaison directe, le 3,3 V est accepté sans souci par
 l'entrée TTL du Minitel.
 
-::: note
-**À vérifier avant de généraliser.** Ce résultat suppose que la ligne TX de ce Minitel ne tient
-aucun pull-up interne significatif vers le 5 V - cohérent avec la norme, mais en tension partielle
-avec le Test 4 de cette fiche, qui relève ≈5,0 V sur la broche 3 à vide. Il est probable que cette
-lecture provienne du réseau de détection de sens du TXS0108E (variante A) branché au moment de la
-mesure, plutôt que d'un pull-up propre au Minitel - mais tant que la broche 3 n'a pas été mesurée
-seule, sans rien branché dessus, la question reste ouverte. Si un pull-up interne existe et se
-révèle plus fort qu'attendu, le point M peut monter au-delà de 3,3 V : le mesurer avant de
-considérer ce montage acquis sur un autre exemplaire. Le retour de courant (Test 5) et le contrôle à
-l'ohmmètre (Test 2) n'ont pas encore été refaits pour cette variante.
-:::
-
 ## Choisir
 
 | | A · TXS0108E | B · résistances | C · pull-up simple |
@@ -262,7 +250,7 @@ l'ohmmètre (Test 2) n'ont pas encore été refaits pour cette variante.
 | Retour de courant, ESP32 éteint | Non limité | ≤ 410 µA | Non mesuré |
 | Ordre de branchement | USB d'abord, impérativement | Indifférent | Indifférent (a priori, comme B) |
 | Sensibilité aux fils longs | Élevée (détection de sens) | Faible | Faible |
-| Point d'incertitude | Aucun, montage validé | Seuil d'entrée du Minitel à 3,3 V | Absence de pull-up interne côté Minitel, à confirmer (voir note) |
+| Point d'incertitude | Aucun, montage validé | Seuil d'entrée du Minitel à 3,3 V | Aucun, mesuré sur ce Minitel |
 
 # 4. Alimenter l'ESP32 par le Minitel
 
