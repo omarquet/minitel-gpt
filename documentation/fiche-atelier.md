@@ -194,28 +194,99 @@ Objectif : se passer de l'USB, pour que l'ensemble démarre en branchant le seul
 délivre **12 V** : il faut donc un abaisseur, **réglé avant tout branchement**.
 
 ```
-   DIN br. 5              MP1584EN                    ESP32-C3
-    12 V  ------------>  regle a 5,0 V  -------+---->  broche 5V     USB DEBRANCHE
-                        (a vide, au voltmetre) |
-                                          [ 470-1000 uF ]
-                                               |
-   DIN br. 2  ---------------------------------+----->  GND
+   fiche DIN                    MP1584EN                        ESP32-C3
+   (cote broches)          4 pastilles, 2 par bord           (USB DEBRANCHE)
+
+                        +---------------------------+
+   br. 5   12 V  -----> | IN+                  OUT+ | ------------>  5V  ---+
+                        |                           |                       |
+                        |      (o) VR : reglage     |                 [ 100-220 uF ]
+                        |                           |                       |  optionnel
+   br. 2   masse ---+-> | IN-                  OUT- | ------------>  GND ---+
+                    |   +---------------------------+                 |
+                    +------------- masse commune ---------------------+
+                    |
+                    |                                             GPIO4  (RX)
+                    |                                                ^
+   br. 3   TX 5 V --|-------[ 10k ]-----+---------------------------+
+                    |                   |
+                    |                [ 20k ]
+                    +-------------------+
+
+
+   br. 1   RX  <------------------------------------------------  GPIO5  (TX)
+                            liaison directe, 3,3 V
 ```
+
+| Pastille du module | Nom alternatif sur certaines séries | Reliée à |
+|---|---|---|
+| `IN+` | `VIN` | DIN broche 5, 12 V |
+| `IN-` | `GND` | DIN broche 2, masse |
+| `OUT+` | `VOUT`, `+` | Broche `5V` de l'ESP32 |
+| `OUT-` | `GND`, `-` | Masse commune |
+| `VR` | potentiomètre multitours bleu | Ne se touche qu'au §4, étape 1, module débranché de l'ESP32 |
+
+Les quatre pastilles sont réparties **deux par bord** : entrée d'un côté, sortie de l'autre. Le
+potentiomètre est multitours : il faut plusieurs tours complets pour parcourir la plage, la tension
+ne bouge donc pas au premier quart de tour - continuer en surveillant le voltmètre plutôt que de
+forcer.
+
+Le montage complet, alimenté par le seul Minitel : plus d'USB, plus de rail 5 V venant d'ailleurs.
+La masse est le fil qui relie tout - broche 2, entrée et sortie du buck, base du pont diviseur et
+`GND` de l'ESP32 - et c'est le premier à brancher, le dernier à débrancher.
+
+Le schéma reprend la **variante B** du §3. Avec la variante A, le `VB` du TXS0108E se prend sur le
+même rail 5 V que l'ESP32, en sortie du buck : dans ce montage autonome, la règle « USB d'abord »
+n'a plus d'objet, puisqu'il n'y a plus d'USB.
 
 ## Procédure, dans cet ordre
 
-1. **Régler le buck à vide.** Alimenter le MP1584EN par une source de laboratoire ou une pile 9 V,
-   et tourner le potentiomètre jusqu'à lire **5,0 V** en sortie. Certains modules sortent d'usine à
-   12 V : brancher avant de régler détruit l'ESP32.
-2. **Vérifier la broche 5 en charge** (§5, test 3) : une tension à vide ne prouve rien, c'est le
-   débit qui compte.
-3. **Souder le condensateur** de 470 à 1000 µF sur le rail 5 V, au plus près de l'ESP32. Les pics de
-   courant du WiFi font décrocher les petits abaisseurs, et un ESP32 qui redémarre en boucle est
-   presque toujours un problème d'alimentation.
+1. **Régler le buck, alimenté par le Minitel lui-même, sortie en l'air.** Relier **uniquement**
+   `IN+` à la broche 5 et `IN-` à la broche 2 - **rien sur `OUT+`**. Minitel allumé, voltmètre sur
+   `OUT+` / `OUT-`, tourner le potentiomètre jusqu'à lire **5,0 V**. Régler sous la tension d'entrée
+   réelle vaut mieux qu'avec une pile de laboratoire, et ne demande aucun matériel de plus.
+2. **Éteindre ou débrancher le DIN**, puis relier `OUT+` à la broche `5V` de l'ESP32 et `OUT-` à la
+   masse. Rebrancher ensuite.
+3. **Vérifier la broche 5 en charge** (§5, test 3) : une tension à vide ne prouve rien, c'est le
+   débit qui compte. Revérifier aussi la sortie du buck **ESP32 connecté et WiFi actif** : si elle
+   tombe sous 4,7 V, la source est trop faible pour ce montage.
 4. **Relier la masse en premier**, puis le 5 V. Débrancher dans l'ordre inverse.
 5. **Ne jamais laisser l'USB branché** en même temps : la broche `5V` de l'ESP32-C3 est le VBUS de
    l'USB, deux sources se retrouveraient en conflit sur le même rail. Pour garder les deux
    possibles, une Schottky en série sur la sortie du buck.
+6. **Essayer sans condensateur d'appoint**, puis lire le moniteur série (ci-dessous).
+
+## Le condensateur d'appoint : seulement si le montage le réclame
+
+Le module MP1584EN a déjà son condensateur de sortie, la carte ESP32 les siens, et le buck débite
+3 A là où l'ESP32-C3 demande des pointes de 300 mA : **la capacité de courant n'est pas le
+problème**. Ce qui l'est, c'est la brutalité de l'appel au passage en émission WiFi - la boucle de
+régulation met quelques dizaines de µs à réagir, et la résistance des fils de plaque d'essai
+transforme le pic en chute de tension **au pied de l'ESP32**, pas à la sortie du buck où l'on
+mesure.
+
+Le firmware tranche tout seul : il affiche la cause du dernier démarrage sur le moniteur série.
+
+| Ligne au démarrage | Verdict |
+|---|---|
+| `mise sous tension`, `bouton RESET` | L'alimentation tient, aucun condensateur à ajouter |
+| `BROWNOUT (alimentation insuffisante)` | Il en faut un |
+| Redémarrages au moment où le WiFi se connecte | Il en faut un |
+
+Le cas échéant : **100 à 220 µF électrolytique, plus 10 µF céramique**, au ras des broches `5V` et
+`GND` de l'ESP32 - pas à la sortie du buck. Le céramique encaisse le front rapide, que
+l'électrolytique, plus lent, ne voit même pas. **1000 µF n'est pas « plus sûr »** : à l'enfichage,
+un tel condensateur appelle un courant de charge qui peut mettre le buck en protection, d'autant
+plus que la broche 5 est une source faible. Sur plaque d'essai, raccourcir les fils gagne souvent
+plus qu'ajouter de la capacité.
+
+::: danger
+**Tant que le réglage n'est pas fait, rien ne se branche en aval.** Certains modules sortent d'usine
+réglés au maximum : une sortie à 12 V sur la broche `5V` de l'ESP32-C3 détruit la carte
+instantanément. Tourner le potentiomètre dans le vide ne risque rien, alors qu'aucune fausse
+manœuvre n'est rattrapable une fois l'ESP32 relié. Si vous intercalez une diode Schottky en sortie
+(pour pouvoir garder l'USB), réglez à **5,3 V** : l'ESP32 verra 5 V après la chute de la diode.
+:::
 
 ::: danger
 **Le courant disponible est faible et mal documenté.** La broche 5 n'est pas une prise de courant :
@@ -372,7 +443,7 @@ Logique inversée : `LOW` = allumée.
 | Chaque caractère s'affiche en double | Écho local actif : `Fnct`+`T` puis `E` |
 | Caractères corrompus ou aléatoires | Vitesse ou format (attendu 1200 7E1) ; fils trop longs. Le TXS0108E supporte mal les lignes capacitives, le pont diviseur est plus prévisible |
 | LED d'alimentation faiblement allumée, USB débranché | Retour de courant par la ligne de données. Diode Schottky sur VB, ou passage en variante B |
-| L'ESP32 redémarre en boucle | Alimentation insuffisante lors des pics WiFi : condensateur 470 à 1000 µF sur le rail 5 V |
+| L'ESP32 redémarre en boucle | Le moniteur série annonce `BROWNOUT` : alimentation insuffisante lors des pics WiFi. 100 à 220 µF plus 10 µF céramique au ras des broches `5V` et `GND` (§4) |
 | `[WS] connecte` puis `deconnecte` en boucle | Jeton absent ou faux : le serveur ferme en silence. Vérifier `WS_TOKEN_ENC`, URL-encodé |
 | Boucle de scan WiFi sans jamais d'écran | Firmware antérieur à septembre 2026 : le scan lancé pendant une tentative de connexion était refusé. Mettre à jour |
 
