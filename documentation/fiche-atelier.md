@@ -392,17 +392,50 @@ Remettre `DEBUG_UART` à `0` ensuite.
 
 # 6. Mise en service du Minitel
 
-À refaire **à chaque allumage** : le Minitel ne mémorise pas ces réglages.
+Le réglage qui compte s'appelle le **mode péri-informatique**. Par défaut, le Minitel route son
+clavier et son écran vers son **modem interne** - il est fait pour téléphoner. Passer en mode
+péri-informatique, c'est réaiguiller ces deux flux vers la **prise DIN** : le clavier sort par la
+broche 3, l'écran est alimenté par la broche 1. Sans cet aiguillage, le câblage est parfait et il ne
+se passe rien.
+
+**À refaire à chaque allumage** : le Minitel ne mémorise aucun de ces réglages.
+
+## Commandes clavier
 
 | Combinaison | Effet |
 |---|---|
-| `Fnct` + `T` puis `A` | Passage en mode péri-informatique |
+| `Fnct` + `T` puis `A` | **Aiguillage vers la prise** : passage en mode péri-informatique |
 | `Fnct` + `T` puis `E` | Coupe l'écho local du clavier |
 | `Fnct` + `Sommaire` | Si besoin : passe du mode répertoire au mode terminal |
+| `Fnct` + `P` puis `1` | Prise à **1200 bauds** - la vitesse attendue par le firmware |
+| `Fnct` + `P` puis `3` | Prise à 300 bauds |
+| `Fnct` + `P` puis `4` | Prise à 4800 bauds, selon le modèle |
+| `Fnct` + `P` puis `9` | Prise à 9600 bauds, Minitel 2 seulement |
+
+Le chiffre de `Fnct` + `P` est le **premier chiffre de la vitesse** : 3 pour 300, 1 pour 1200, 4
+pour 4800, 9 pour 9600. C'est le seul moyen mnémotechnique de s'en souvenir devant la machine.
 
 ::: note
-**Ne pas toucher à la vitesse.** La prise démarre à 1200 bauds, 7E1, ce qui correspond au firmware
-(`SERIAL_7E1`, 1200). Les combinaisons `Fnct` + `P` ne servent pas ici.
+**La vitesse doit rester à 1200 bauds, 7E1.** C'est la valeur de sortie d'usine de la prise, et
+celle du firmware (`SERIAL_7E1`, 1200). Ces combinaisons ne servent donc qu'à **revenir** en arrière
+si la vitesse a été changée par mégarde - le symptôme est sans ambiguïté : des caractères corrompus
+ou aléatoires alors que le câblage est bon. Monter à 4800 demanderait de changer aussi le firmware,
+sans bénéfice : le Minitel affiche de toute façon plus lentement qu'il ne reçoit.
+:::
+
+## La version logicielle du « Fnct+T puis A »
+
+Le firmware envoie lui-même l'aiguillage, par une séquence **PRO3** sur la liaison série (`ESC 3B`,
+`AIGUILLAGE_ON`, récepteur, émetteur), répétée pendant les 5 premières secondes après le démarrage -
+le Minitel peut être encore en train de s'initialiser au moment du premier envoi, et la séquence
+serait perdue en silence.
+
+::: note
+**Non vérifié sur ce Minitel 2 Alcatel.** La couche Protocole fait partie de la norme Teletel
+commune à toute la gamme, et la séquence est documentée pour le Minitel 1B, mais personne ne l'a
+encore confirmée sur ce modèle. Si le clavier ne remonte rien sans avoir tapé `Fnct` + `T` puis `A`
+à la main, c'est que l'aiguillage automatique n'a pas eu l'effet attendu : la manipulation manuelle
+reste le repli, et elle ne coûte rien.
 :::
 
 # 7. Firmware et configuration
