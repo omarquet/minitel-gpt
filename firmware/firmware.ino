@@ -52,8 +52,11 @@
  * ------------------------------------------
  * setup() envoie une sequence PRO3 (voir forcerModePeriInformatique()) qui
  * demande au Minitel de router son clavier et son ecran vers la prise
- * peri-informatique, a la place de "Fnct+T puis A" tape a la main. Experimental,
- * non verifie sur ce modele (Minitel 2 Alcatel) : si le clavier ne remonte
+ * peri-informatique, a la place de "Fnct+T puis A" tape a la main. Repetee
+ * pendant FORCE_MODE_WINDOW_MS apres le boot (idleTick()/loop()) : le
+ * Minitel peut encore etre en train de demarrer lui-meme au moment du tout
+ * premier envoi, qui serait alors perdu en silence. Experimental, non
+ * verifie sur ce modele (Minitel 2 Alcatel) : si le clavier ne remonte
  * toujours pas sans la manip manuelle, cette sequence n'a pas suffi.
  *
  * CONFIGURATION WIFI SANS ORDINATEUR
@@ -203,6 +206,24 @@ void forcerModePeriInformatique() {
   aiguillage(CODE_PRISE_REC, CODE_CLAVIER);   // clavier -> prise (sens montant)
   aiguillage(CODE_ECRAN, CODE_PRISE_EM);      // prise -> ecran (sens descendant)
   Serial.println("[Minitel] aiguillage force vers la prise peri-informatique (PRO3)");
+}
+
+// Un seul envoi ferait reposer tout le mecanisme sur un delai devine : le
+// Minitel peut encore etre en train de demarrer lui-meme (sortie de veille,
+// reset interne) au moment ou l'ESP32 envoie sa toute premiere sequence,
+// qui serait alors perdue en silence. On la repete donc pendant quelques
+// secondes plutot que de parier sur un seul instant - inoffensif si le
+// Minitel a deja bascule, ca ne fait que reaffirmer le meme aiguillage.
+#define FORCE_MODE_WINDOW_MS 5000   // duree totale des tentatives apres le boot
+#define FORCE_MODE_PERIOD_MS 500    // intervalle entre deux tentatives
+static unsigned long forceModeUntilMs = 0;
+static unsigned long lastForceModeMs = 0;
+
+void maybeForceModePeriInformatique() {
+  if (millis() >= forceModeUntilMs) return;
+  if (millis() - lastForceModeMs < FORCE_MODE_PERIOD_MS) return;
+  lastForceModeMs = millis();
+  forcerModePeriInformatique();
 }
 
 // LED de statut integree a la carte, sur GPIO8, en logique INVERSEE.
@@ -380,8 +401,11 @@ void checkResetButton() {
   }
 }
 
-// Attente active commune : la LED continue de vivre et le bouton reste lu.
-void idleTick() { updateStatusLed(); checkResetButton(); delay(5); }
+// Attente active commune : la LED continue de vivre, le bouton reste lu, et
+// les tentatives d'aiguillage se poursuivent meme si le WiFi met du temps a
+// se connecter (l'ecran de configuration peut a lui seul tenir plusieurs
+// dizaines de secondes, largement au-dela de FORCE_MODE_WINDOW_MS sinon).
+void idleTick() { updateStatusLed(); checkResetButton(); maybeForceModePeriInformatique(); delay(5); }
 
 bool tryConnect(const char* ssid, const char* pass, unsigned long timeoutMs) {
   WiFi.disconnect();
@@ -605,7 +629,9 @@ void setup() {
   unsigned long t0 = millis();
   while (!Serial && millis() - t0 < 2000) delay(10);
   Minitel.begin(1200, SERIAL_7E1, MINITEL_RX, MINITEL_TX);
-  forcerModePeriInformatique();
+  forceModeUntilMs = millis() + FORCE_MODE_WINDOW_MS;
+  forcerModePeriInformatique();          // premier envoi immediat
+  lastForceModeMs = millis();            // les suivants passent par idleTick()/loop()
 
   // Cause du dernier demarrage : distingue un redemarrage volontaire du filet
   // WiFi (SW) d'un plantage (PANIC), d'un watchdog, ou d'une alimentation qui
@@ -676,6 +702,7 @@ void loop() {
   webSocket.loop();
   updateStatusLed();
   checkResetButton();                         // apres la LED : l'appui la fige
+  maybeForceModePeriInformatique();
   // Appui bref alors que tout va bien : sans effet, mais on l'oublie pour
   // qu'il ne surgisse pas au prochain passage par la configuration.
   if (setupRequested) {
