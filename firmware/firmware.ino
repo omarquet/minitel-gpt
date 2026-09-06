@@ -48,6 +48,14 @@
  *   Le courant disponible sur la broche 5 est faible et mal documente : le
  *   mesurer en charge WiFi avant de considerer le montage fiable.
  *
+ * MODE PERI-INFORMATIQUE FORCE AU DEMARRAGE
+ * ------------------------------------------
+ * setup() envoie une sequence PRO3 (voir forcerModePeriInformatique()) qui
+ * demande au Minitel de router son clavier et son ecran vers la prise
+ * peri-informatique, a la place de "Fnct+T puis A" tape a la main. Experimental,
+ * non verifie sur ce modele (Minitel 2 Alcatel) : si le clavier ne remonte
+ * toujours pas sans la manip manuelle, cette sequence n'a pas suffi.
+ *
  * CONFIGURATION WIFI SANS ORDINATEUR
  * ----------------------------------
  * Au demarrage, dans l'ordre : le reseau memorise en NVS (choisi une fois sur
@@ -159,6 +167,43 @@ static String usedSsid, usedPass;
 #define MINITEL_RX 4    // ESP32-C3 RX  <- Minitel TX (broche DIN 3)
 #define MINITEL_TX 5    // ESP32-C3 TX  -> Minitel RX (broche DIN 1)
 HardwareSerial Minitel(1);
+
+// ---------------------------------------------------------------------------
+// Aiguillage automatique en mode peri-informatique (protocole Teletel)
+//
+// Remplace la manip manuelle "Fnct+T puis A" : la couche "Protocole" du
+// Minitel route normalement le clavier vers son modem interne (mode
+// Videotex) ; on lui demande ici de router clavier <-> prise
+// peri-informatique a la place, par une sequence PRO3 envoyee sur la liaison
+// serie elle-meme (rien a cabler de plus, deja sur GPIO5).
+//
+// Sequence documentee pour le Minitel 1B (bibliotheque Arduino
+// Minitel1B_Hard, fonction aiguillage()) : ESC 0x3B (PRO3), AIGUILLAGE_ON,
+// recepteur, emetteur. NON VERIFIEE sur ce Minitel 2 Alcatel - la couche
+// Protocole fait partie de la norme Teletel commune a toute la gamme, mais
+// personne ne l'a encore confirme sur ce modele precis. A surveiller au
+// premier essai reel : si le clavier ne remonte toujours pas sans
+// Fnct+T+A manuel, cette fonction n'a pas eu l'effet attendu.
+#define PRO3           0x3B
+#define AIGUILLAGE_ON  0x61
+#define CODE_ECRAN     0x58   // reception ecran
+#define CODE_CLAVIER   0x51   // emission clavier
+#define CODE_PRISE_EM  0x53   // emission prise peri-informatique
+#define CODE_PRISE_REC 0x5B   // reception prise peri-informatique
+
+void aiguillage(uint8_t recepteur, uint8_t emetteur) {
+  Minitel.write(0x1B);         // ESC
+  Minitel.write(PRO3);
+  Minitel.write(AIGUILLAGE_ON);
+  Minitel.write(recepteur);
+  Minitel.write(emetteur);
+}
+
+void forcerModePeriInformatique() {
+  aiguillage(CODE_PRISE_REC, CODE_CLAVIER);   // clavier -> prise (sens montant)
+  aiguillage(CODE_ECRAN, CODE_PRISE_EM);      // prise -> ecran (sens descendant)
+  Serial.println("[Minitel] aiguillage force vers la prise peri-informatique (PRO3)");
+}
 
 // LED de statut integree a la carte, sur GPIO8, en logique INVERSEE.
 // GPIO8 est une broche de strapping (doit etre a l'etat haut au boot) : on ne
@@ -560,6 +605,7 @@ void setup() {
   unsigned long t0 = millis();
   while (!Serial && millis() - t0 < 2000) delay(10);
   Minitel.begin(1200, SERIAL_7E1, MINITEL_RX, MINITEL_TX);
+  forcerModePeriInformatique();
 
   // Cause du dernier demarrage : distingue un redemarrage volontaire du filet
   // WiFi (SW) d'un plantage (PANIC), d'un watchdog, ou d'une alimentation qui
