@@ -127,19 +127,27 @@ def _texte(fragment, paragraphes=False):
     return _EMPTY_NOTICE.sub("", x).strip()
 
 
-def _sessions(grille, descriptions):
+def _sessions(grille, descriptions, jour=""):
     """HTML d'une grille -> une session par ligne, description en dessous.
 
     On itere sur les cartes (chacune est un lien vers sa fiche) plutot que sur
     le texte aplati : c'est ce lien qui donne l'identifiant de la session, donc
     sa description. Aplati, le texte collait aussi la salle d'une session a
-    l'horaire de la suivante."""
+    l'horaire de la suivante.
+
+    `jour` est recopie EN TETE DE CHAQUE LIGNE. Il ne figurait qu'une fois, en
+    en-tete de bloc, avec une cinquantaine de sessions en dessous : le modele
+    perdait le fil et attribuait au mauvais jour une session lue cinquante
+    lignes plus bas (vu sur le vrai Minitel : une session du mardi 22 annoncee
+    mercredi 23, puis l'inverse d'une question a l'autre). Le jour est une
+    donnee de la grille, pas une deduction a lui laisser faire."""
     lignes = []
+    prefixe = f"[{jour}] " if jour else ""
     for slug, carte in _CARTE.findall(grille):
         entete = _texte(carte).lstrip("> ").strip()
         if not entete:
             continue
-        lignes.append(entete)
+        lignes.append(prefixe + entete)
         desc = descriptions.get(slug, "")
         if desc:
             lignes.append("   " + DESC_MARKER)
@@ -255,7 +263,7 @@ def fetch():
         blocs = []
         for i, grille in enumerate(grilles):
             titre = jours[i] if i < len(jours) else f"Jour {i + 1}"
-            sessions = _sessions(grille, descs)
+            sessions = _sessions(grille, descs, titre)
             blocs.append(f"== {titre} ==\n"
                          + (sessions or "Aucune session publiee pour l'instant."))
         return "\n".join(blocs)[:MAX_CHARS]
@@ -398,6 +406,22 @@ def render(texte):
     return _LISTE_RE.sub(_rendre_liste, _FICHE_RE.sub(_rendre_fiche, texte))
 
 
+LECTURE_INSTRUCTIONS = (
+    "\n\nLECTURE DU PROGRAMME. Chaque ligne de session commence par son jour "
+    "entre crochets : c'est CE jour-la, jamais un autre. Ne le deduis pas de "
+    "l'ordre des lignes ni de ce que tu crois savoir."
+    "\n\nRecherche par nom. Un prenom seul (\"olivier\") est une demande de "
+    "recherche : parcours TOUTES les lignes du programme avant de repondre, "
+    "les intervenants y figurent en clair. Ne conclus a l'absence que si tu "
+    "as vraiment tout parcouru - et si tu trouves quelqu'un, c'est que la "
+    "reponse est oui."
+    "\n\nReponds directement. Tu n'annonces pas que tu verifies, tu ne "
+    "racontes pas ta demarche, et tu ne te corriges pas a voix haute : une "
+    "reponse qui dit \"aucun intervenant ne s'appelle Olivier\" puis \"en "
+    "revanche Olivier Marquet intervient...\" est a la fois fausse et "
+    "illisible sur un ecran de 40 colonnes."
+)
+
 GABARIT_INSTRUCTIONS = (
     "\n\nAFFICHAGE DES SESSIONS. Tu ne dessines jamais la mise en page toi-meme "
     "(pas de filets, pas de tirets, pas de couleurs autour d'une session) : tu "
@@ -411,11 +435,12 @@ GABARIT_INSTRUCTIONS = (
     "\navec: les intervenants, separes par des virgules"
     "\n{/fiche}"
     "\nPuis, APRES le bloc, le resume de la session en texte normal."
-    "\n\nPour PLUSIEURS sessions, une par ligne, horaire et salle avant le "
-    "titre, separes par des barres verticales :"
+    "\n\nPour PLUSIEURS sessions, une par ligne, le quand et la salle avant le "
+    "titre, separes par des barres verticales. Mets le jour dans le premier "
+    "champ des que la liste couvre les deux journees :"
     "\n{liste}"
-    "\n15:00-15:45 | Amphi Berlioz | Le titre de la session"
-    "\n16:00-16:45 | Salle Ravel | Le titre de la suivante"
+    "\nMar. 22 - 15:00-15:45 | Amphi Berlioz | Le titre de la session"
+    "\nMer. 23 - 16:00-16:45 | Salle Ravel | Le titre de la suivante"
     "\n{/liste}"
     "\n\nN'invente pas de champ, n'en ajoute pas d'autres, et n'ecris rien "
     "d'autre a l'interieur des blocs."
@@ -446,4 +471,4 @@ def prompt_note(key=None, question=""):
             f"heure de Paris.\n"
             "PROGRAMME OFFICIEL DE LA CONFERENCE (il fait autorite, c'est ta "
             "seule source sur les sessions) :\n" + prog
-            + GABARIT_INSTRUCTIONS)
+            + LECTURE_INSTRUCTIONS + GABARIT_INSTRUCTIONS)
