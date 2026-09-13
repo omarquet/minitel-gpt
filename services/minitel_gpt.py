@@ -1074,10 +1074,17 @@ def paginate_lines(lines, rows=CONTENT_ROWS, min_last=3, slack=5):
         compact.pop()
     lines = compact
 
-    def fin_de_paragraphe(depuis, jusqu_a):
-        """Index de la derniere ligne vide dans [jusqu_a, depuis], ou None."""
+    def coupure_propre(depuis, jusqu_a):
+        """Index de la derniere coupure acceptable dans [jusqu_a, depuis].
+
+        Deux endroits conviennent : une ligne vide (fin de paragraphe), et le
+        DEBUT d'un element de liste. Sans ce second cas, une enumeration a
+        tirets - que le modele ecrit sans ligne vide entre les items - n'offrait
+        aucune coupure : la page se terminait alors en plein milieu d'une phrase
+        ("...qui fait tourner ce" / "terminal !" en haut de la page suivante),
+        l'item coupe en deux."""
         for i in range(min(depuis, len(lines) - 1), max(jusqu_a, 0) - 1, -1):
-            if not lines[i].strip():
+            if not lines[i].strip() or _LIST_ITEM_RE.match(lines[i]):
                 return i
         return None
 
@@ -1110,13 +1117,13 @@ def paginate_lines(lines, rows=CONTENT_ROWS, min_last=3, slack=5):
             pages.append(lines)
             break
         # `or` sans risque : lines[0] n'est jamais vide a ce stade, donc
-        # fin_de_paragraphe ne peut pas renvoyer l'index 0.
-        cut = fin_de_paragraphe(rows, rows - slack) or rows
+        # coupure_propre ne peut pas renvoyer l'index 0.
+        cut = coupure_propre(rows, rows - slack) or rows
         # A defaut de fin de paragraphe utilisable, on recule d'une ligne a la
         # fois : un paragraphe monolithique plus long qu'une page vaut mieux
         # equilibre (19 lignes -> 16 + 3) qu'en orphelin (18 + 1).
         while 0 < reste_utile(cut) < min_last and cut > rows // 2:
-            cut = fin_de_paragraphe(cut - 1, rows // 2) or (cut - 1)
+            cut = coupure_propre(cut - 1, rows // 2) or (cut - 1)
         pages.append(lines[:cut])
         lines = lines[cut:]
     return pages or [[""]]
