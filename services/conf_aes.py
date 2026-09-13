@@ -507,7 +507,12 @@ def _rendre_liste(m):
 # | L'IA va obliger...", vu a l'ecran). Une ligne a deux barres est une session
 # quoi qu'il arrive : on la rend comme si elle etait dans un {liste}. La barre
 # verticale n'appartient pas au francais courant, le faux positif est theorique.
-_LIGNE_PIPE_RE = re.compile(r"^[ \t]*[-*]?[ \t]*([^|\n]+\|[^|\n]+\|[^\n]+)$", re.M)
+# Le premier champ doit porter un HORAIRE. Sans cette exigence, n'importe quelle
+# ligne a deux barres passait pour une session : une grille de morpion
+# (" 1 | 2 | 3") etait redessinee en fausse fiche. Le gabarit, lui, commence
+# toujours par "Mar. 22 - 15:00-15:45".
+_LIGNE_PIPE_RE = re.compile(
+    r"^[ \t]*[-*]?[ \t]*([^|\n]*\d{1,2}:\d{2}[^|\n]*\|[^|\n]+\|[^\n]+)$", re.M)
 
 
 def _rendre_ligne_orpheline(m):
@@ -515,12 +520,18 @@ def _rendre_ligne_orpheline(m):
     return "\n".join(mg.ART_MARK + ln for ln in lignes) if lignes else m.group(0)
 
 
-def render(texte):
+def render(texte, key=None):
     """Remplace les blocs {fiche} et {liste} de la reponse par leur rendu.
 
     A appeler a l'AFFICHAGE, pas avant de ranger la reponse dans l'historique :
-    le modele doit relire ses propres champs, pas des lignes deja dessinees."""
-    if not texte:
+    le modele doit relire ses propres champs, pas des lignes deja dessinees.
+
+    `key` est la personnalite active : ce rendu ne concerne QU'Agile en Seine et
+    ne doit pas toucher aux reponses des autres. Applique a tout le monde, il
+    mangeait une grille de morpion - " 1 | 2 | 3" a deux barres, donc prise pour
+    une session et redessinee en "1 2" puis "3" (vu a l'ecran). Un module
+    evenementiel n'a pas a abimer le reste du terminal."""
+    if not texte or (key is not None and not is_aes_preset(key)):
         return texte
     texte = _LISTE_RE.sub(_rendre_liste, _FICHE_RE.sub(_rendre_fiche, texte))
     # Apres les blocs : ce qui reste avec des barres n'a pas ete encadre. Les
