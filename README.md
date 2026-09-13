@@ -62,56 +62,56 @@ de personnalité active directement depuis le Minitel.
 
 ---
 
-## Matériel (ESP32)
+## Matériel (ESP32-C3)
+
+> **Le firmware est écrit pour un ESP32-C3**, et son brochage lui est propre.
+> Sur cette puce, UART0 sert à la console USB et **les GPIO11 à GPIO17 sont
+> réservés à la mémoire flash** : les GPIO16/17 des projets ESP32 classiques
+> sont donc inutilisables ici. Le pont utilise **UART1 sur GPIO4 (RX) et
+> GPIO5 (TX)**. Pour une autre carte ESP32, seuls les numéros de broches et le
+> numéro d'UART changent (en tête de `firmware/firmware.ino`) - le reste du
+> code est portable.
 
 | Élément | Détail |
 |---|---|
-| ESP32 | N'importe quelle carte de dev (WiFi + 2 UART) |
-| Adaptateur de niveau logique | **Bidirectionnel obligatoire** (BSS138 / TXS0108E) |
-| Buck converter | Optionnel : régulateur 5 V pour alimenter l'ESP32 depuis le Minitel |
+| ESP32-C3 | Carte de dev WiFi. LED de statut sur `GPIO8` (logique inversée), bouton BOOT sur `GPIO9` |
+| Adaptation de niveau | Une résistance de 10 k en pull-up, ou un TXS0108E - voir la fiche d'atelier |
+| MP1584EN | Optionnel : abaisseur 12 V → 5 V pour alimenter l'ESP32 depuis le Minitel |
 | Minitel | Prise DIN 5 broches « péri-informatique » |
 
 > ⚠️ **Piège matériel** : le port DIN du Minitel est en **5 V**, les GPIO de
-> l'ESP32 en **3,3 V non tolérants 5 V**. Un adaptateur de niveau logique
-> bidirectionnel est **obligatoire**, au moins sur Minitel TX → ESP32 RX (sinon
-> tu grilles le GPIO). Recommandé aussi dans l'autre sens pour une marge propre.
+> l'ESP32-C3 en **3,3 V non tolérants 5 V**. Ne jamais relier la ligne TX du
+> Minitel directement à une entrée.
 
-> ⚠️ **Le brochage DIN-5 n'est pas séquentiel** : de gauche à droite vu de
-> face (détrompeur en bas), c'est **1 - 4 - 2 - 5 - 3**, pas 1-2-3-4-5.
+> ⚠️ **Le brochage DIN-5 n'est pas séquentiel** : côté broches de la fiche mâle
+> du câble (celle qu'on tient en main), c'est **3 - 5 - 2 - 4 - 1**.
 
 ### Câblage
 
-Exemple validé sur un Minitel 1B Matra (carte VGP5) :
-
-| DIN Minitel | ESP32 (via level shifter) | Rôle |
+| DIN Minitel | ESP32-C3 | Rôle |
 |---|---|---|
-| broche 1 | UART2 TX (GPIO17) | ESP32 → Minitel (RX) |
-| broche 3 | UART2 RX (GPIO16) | Minitel → ESP32 (TX) |
-| broche 2 | GND | masse commune (ESP32, buck, level shifter) |
-| broche 5 | buck converter → 5 V | alimentation ESP32 (VIN) + côté HV du level shifter (optionnel, évite une alim externe) |
-| broche 4 | **ne pas toucher** | — |
-
-Alimentation depuis la broche 5 (~8,5 à 13 V selon le Minitel) : passer par
-un buck converter réglé sur 5 V avant l'ESP32, avec un condensateur
-470-1000 µF sur le rail 5 V. Le côté LV (VCCA) du level shifter reste sur le
-3,3 V de l'ESP32, le côté HV (VCCB) sur le 5 V du buck.
-
-> ⚠️ Cette alimentation sur la broche 5 dépend du circuit vidéo interne du
-> Minitel 1B : les modèles à base de **VGP5** (comme le Matra ci-dessus) la
-> fournissent, les plus anciens à base de **VGP2** ne l'ont pas - prévoir une
-> alimentation externe pour l'ESP32 dans ce cas.
+| broche 1 | `GPIO5` (UART1 TX) | ESP32 → Minitel |
+| broche 3 | `GPIO4` (UART1 RX), via pull-up ou TXS0108E | Minitel → ESP32 |
+| broche 2 | `GND` | Masse commune |
+| broche 5 | MP1584EN réglé à 5 V → broche `5V` | **12 V mesurés** : alimentation optionnelle, jamais en direct |
+| broche 4 | **ne pas toucher** | 5 V mesurés, à isoler |
 
 Paramètres série : **1200 bauds, 7 bits, parité paire, 1 stop (7E1)** - norme
 Videotex, gérés par l'UART de l'ESP32 (`SERIAL_7E1`).
+
+> 📄 **Le montage complet est décrit dans [`documentation/fiche-atelier.md`](documentation/fiche-atelier.md)**,
+> imprimable en PDF : trois montages au choix, brochage détaillé, couleurs des
+> fils, tests au multimètre et dépannage.
 
 ### Firmware
 
 `firmware/firmware.ino` - relais transparent octet à octet entre
 l'UART du Minitel et une connexion WebSocket cliente (lib **WebSockets** de
 Markus Sattler / Links2004, disponible dans le gestionnaire de bibliothèques
-Arduino). À configurer avant flash : SSID/mot de passe WiFi, domaine du
-serveur (`WS_HOST`), et le jeton `WS_TOKEN` dans `WS_PATH` si configuré côté
-serveur.
+Arduino). À configurer avant flash, dans `firmware/secrets.h` (modèle :
+`secrets.h.example`) : réseaux WiFi, `WS_HOST_PROD`, `USE_LOCAL` et le jeton
+`WS_TOKEN_ENC` URL-encodé. Le `.ino` ne contient aucune valeur d'installation
+et refuse de compiler si l'une manque.
 
 ---
 
