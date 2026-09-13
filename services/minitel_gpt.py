@@ -53,7 +53,12 @@ _MARKDOWN_PATTERNS = [
 # qui traverse to_ascii et apply_minitel_markup sans etre touche, et que wrap()
 # reconnait pour recopier la ligne telle quelle.
 ART_MARK = "\x01"
-_ART_RE = re.compile(r"\{art\}[ \t]*\n?(.*?)\n?[ \t]*\{/art\}", re.S)
+# Les blancs ne sont manges QUE s'ils accompagnent un retour a la ligne. Avec
+# `[ \t]*\n?`, la premiere rangee d'une grille collee a la balise
+# ("{art} . | O | ." sur une seule ligne) perdait son espace de gauche et se
+# decalait d'un cran par rapport aux suivantes - une grille de morpion visible-
+# ment de travers a l'ecran, alors que le modele l'avait bien dessinee.
+_ART_RE = re.compile(r"\{art\}(?:[ \t]*\n)?(.*?)(?:\n[ \t]*)?\{/art\}", re.S)
 
 # Typographie francaise : une espace precede ? ! : et ;. wrap() decoupe sur les
 # espaces, il peut donc laisser la ponctuation seule en debut de ligne
