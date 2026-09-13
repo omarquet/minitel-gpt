@@ -91,6 +91,14 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 COLS = 40
 SCREEN_ROWS = 24
 CONTENT_ROWS = 18          # lignes de contenu par page de réponse
+# Rangées du pied de page ("-- SUITE --" et sa ligne vide), que la DERNIÈRE
+# page n'a pas : elle rend la main à l'invite de saisie. Une page unique peut
+# donc porter CONTENT_ROWS + 2 = 20 lignes, ce qui remplit l'écran au caractère
+# près : 20 lignes + la ligne vide + "Repondez ou SOMMAIRE" + son saut + "> "
+# font exactement 24 rangées. Compromis assumé : sur une telle page, taper une
+# question de plus de 38 caractères fait défiler la première ligne de la
+# réponse - déjà lue à ce stade.
+PIED_DE_PAGE = 2
 IDLE_TIMEOUT = 300         # 5 min → retour sommaire
 
 # ── Fournisseur d'IA (LLM) ───────────────────────────────────────────────
@@ -546,6 +554,12 @@ MARKUP_INSTRUCTIONS = (
     "le terminal et sort tronque a droite. Une grille dessinee SANS {art} sort "
     "desalignee, ses espaces ecrases et ses lignes recollees - c'est le defaut "
     "le plus visible a l'ecran."
+    "\n\nUn dessin coute des lignes, et l'ecran n'en a que 18 par page. Quand "
+    "ta reponse contient un {art}, reduis le texte autour a trois ou quatre "
+    "lignes et choisis la grille la plus compacte qui reste lisible, pour que "
+    "l'ensemble tienne sur UNE page. Une partie dont la grille s'est retrouvee "
+    "sur la page precedente est injouable : le joueur ne la voit plus au moment "
+    "de jouer."
     "\n\nMise en page. Deux regles opposees, ne les confonds pas."
     "\n1. Ne coupe JAMAIS une phrase sur plusieurs lignes. Ecris chaque phrase "
     "d'un seul trait : c'est le terminal qui la decoupe en lignes de 40 "
@@ -1071,6 +1085,17 @@ def paginate_lines(lines, rows=CONTENT_ROWS, min_last=3, slack=5):
         while i < len(lines) and not lines[i].strip():
             i += 1
         return len(lines) - i
+
+    # Un ecran de 24 rangees se repartit ainsi : `rows` lignes de contenu, une
+    # ligne vide, puis les deux lignes de pied ("-- SUITE ... --"). Or la
+    # DERNIERE page n'a pas de pied : elle rend la main a l'invite de saisie.
+    # Elle peut donc prendre ces deux rangees, et une reponse a peine plus
+    # longue qu'une page tient finalement en une seule. Sans ce calcul, une
+    # reponse de 20 lignes partait en 15 + 4 : deux pages, dont une a quatre
+    # lignes et quatorze rangees vides - et pour une grille de morpion, la
+    # grille se retrouvait sur la page precedente au moment de jouer.
+    if len(lines) <= rows + PIED_DE_PAGE:
+        return [lines]
 
     pages = []
     while lines:
