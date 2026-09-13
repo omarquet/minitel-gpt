@@ -377,17 +377,35 @@ def _rendre_fiche(m):
     return "\n".join(mg.ART_MARK + ln for ln in lignes)
 
 
+# Dernier champ d'une entree de liste, facultatif : les intervenants. Reconnu
+# a son etiquette et non a sa position, pour que "quand | salle | titre"
+# continue de marcher tel quel - le titre reste le dernier champ non etiquete.
+_AVEC_RE = re.compile(r"^avec\s*:?\s*(.+)$", re.I | re.S)
+
+
 def _entree_liste(ligne):
-    """Une session "quand | salle | titre" -> ses deux lignes d'ecran."""
+    """Une session "quand | salle | titre [| avec: X, Y]" -> ses lignes d'ecran.
+
+    Les intervenants sont affiches quand le modele les donne : sans eux, une
+    recherche par nom rend une liste que rien ne permet de verifier a l'ecran
+    (vu sur "fabrice" : trois sessions, aucun nom affiche)."""
     bouts = [b.strip() for b in ligne.split("|") if b.strip()]
     if len(bouts) < 2:
         return []                     # ligne vide ou inexploitable
+    avec = ""
+    m = _AVEC_RE.match(bouts[-1]) if len(bouts) >= 3 else None
+    if m:
+        avec = m.group(1).strip()
+        bouts = bouts[:-1]
     # L'en-tete est PLIE, pas tronque : le modele ecrit parfois un "quand"
     # bavard ("Jour 1 (mardi 22), 15:00 - 15:45") qui, ajoute a la salle,
     # depassait les 39 colonnes et finissait coupe en plein mot ("Amphi").
     entete = "  ".join(bouts[:-1])
-    return (["{jaune}" + ln + "{/}" for ln in _plier(entete, FICHE_COLS)]
-            + _plier(bouts[-1], FICHE_COLS))
+    lignes = (["{jaune}" + ln + "{/}" for ln in _plier(entete, FICHE_COLS)]
+              + _plier(bouts[-1], FICHE_COLS))
+    if avec:
+        lignes += _plier("avec " + avec, FICHE_COLS)
+    return lignes
 
 
 def _rendre_liste(m):
@@ -441,6 +459,11 @@ LECTURE_INSTRUCTIONS = (
     "les intervenants y figurent en clair. Ne conclus a l'absence que si tu "
     "as vraiment tout parcouru - et si tu trouves quelqu'un, c'est que la "
     "reponse est oui."
+    "\n\nNe cite QUE les sessions ou le nom demande figure vraiment parmi les "
+    "intervenants de la ligne. Pas de session ajoutee parce que son sujet "
+    "ressemble, parce qu'elle ouvre la journee, ou pour etoffer une liste "
+    "courte : une seule session qui correspond vaut mieux que trois dont deux "
+    "sont fausses. Et donne le nom trouve, pour qu'on puisse verifier."
     "\n\nReponds directement. Tu n'annonces pas que tu verifies, tu ne "
     "racontes pas ta demarche, et tu ne te corriges pas a voix haute : une "
     "reponse qui dit \"aucun intervenant ne s'appelle Olivier\" puis \"en "
@@ -466,9 +489,11 @@ GABARIT_INSTRUCTIONS = (
     "\nPuis, APRES le bloc, le resume de la session en texte normal."
     "\n\nPour PLUSIEURS sessions, une par ligne, le quand et la salle avant le "
     "titre, separes par des barres verticales. Mets le jour dans le premier "
-    "champ des que la liste couvre les deux journees :"
+    "champ des que la liste couvre les deux journees. Quand la question porte "
+    "sur une personne, ajoute un dernier champ \"avec:\" avec les intervenants "
+    "- c'est ce qui permet de verifier la reponse a l'ecran :"
     "\n{liste}"
-    "\nMar. 22 - 15:00-15:45 | Amphi Berlioz | Le titre de la session"
+    "\nMar. 22 - 15:00-15:45 | Amphi Berlioz | Le titre de la session | avec: Prenom Nom, Autre Nom"
     "\nMer. 23 - 16:00-16:45 | Salle Ravel | Le titre de la suivante"
     "\n{/liste}"
     "\n\nN'invente pas de champ, n'en ajoute pas d'autres, et n'ecris rien "
