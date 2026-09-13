@@ -40,6 +40,9 @@ KEYWORDS = ("agile en seine", "agileenseine", "aes")
 # La personnalite dediee, pour qui le programme est injecte a CHAQUE question :
 # "c'est quoi les prochaines confs ?" ne contient aucun mot-clef.
 PRESET_KEY = "agile_en_seine"
+# Le fichier de prompt de cette personnalite. Il sert de second signe de
+# reconnaissance : voir is_aes_preset().
+PROMPT_FILE = "agile_en_seine.txt"
 # Format du cache des descriptions. A incrementer quand ce qu'on stocke change :
 # les fiches deja relevees sont sinon conservees telles quelles, leur date de
 # modification n'ayant pas bouge. La v1 gardait des extraits de 320 caracteres.
@@ -103,6 +106,28 @@ _SLOT = re.compile(r"\d{2}:\d{2} - \d{2}:\d{2}")
 # Chaque grille embarque ce message d'etat vide, cache en display:none. Recopie
 # tel quel, il faisait dire au modele qu'une journee pourtant pleine etait vide.
 _EMPTY_NOTICE = re.compile(r"Aucun programme n'est pr[ée]vu[^.]*", re.I)
+
+
+def is_aes_preset(key):
+    """La personnalite active est-elle celle d'Agile en Seine ?
+
+    On ne se fie pas au seul identifiant. L'admin permet de renommer une
+    personnalite ou d'en creer une copie : son identifiant cesse alors de valoir
+    PRESET_KEY, le programme n'est plus injecte, et RIEN NE LE DIT - le modele
+    repond de memoire et invente des sessions parfaitement plausibles (vu :
+    "09:40 De l'Agilite a l'Impact, Amphi Arc-en-Ciel", une session et une salle
+    qui n'existent pas). Une erreur muette est pire qu'une panne. On reconnait
+    donc aussi la personnalite a son fichier de prompt, qui, lui, ne change pas
+    quand on renomme."""
+    if key == PRESET_KEY:
+        return True
+    try:
+        with open(mg.PROMPTS_FILE, encoding="utf-8") as f:
+            preset = json.load(f).get("presets", {}).get(key) or {}
+    except Exception as e:
+        log.warning("lecture de prompts.json pour %r : %s", key, e)
+        return False
+    return preset.get("prompt_file") == PROMPT_FILE
 
 
 def is_question(text):
@@ -562,7 +587,7 @@ def prompt_note(key=None, question=""):
     que le jour, or sans l'heure "les prochaines conferences" ne veut rien dire.
     Le conteneur tourne en Europe/Paris (TZ + tzdata), donc l'heure locale EST
     l'heure de Paris."""
-    if key != PRESET_KEY and not is_question(question):
+    if not is_aes_preset(key) and not is_question(question):
         return ""
     prog = programme()
     if not prog:
@@ -583,6 +608,10 @@ def prompt_note(key=None, question=""):
     semaine = mg.JOURS_FR[now.weekday()]
     jour = "1er" if now.day == 1 else str(now.day)
     date = f"{semaine} {jour} {mg.MOIS_FR[now.month - 1]} {now.year}"
+    log.info("programme AES injecte : %d caracteres, %d sessions "
+             "(personnalite active : %r)",
+             len(prog), sum(1 for l in prog.split("\n") if _LIGNE_SESSION.match(l)),
+             key)
     # Consignes AVANT le programme, rappel APRES : le programme fait ~86 ko
     # (les descriptions entieres), et une consigne posee derriere un tel pave
     # se fait oublier - le modele reprenait la forme du gabarit sans le bloc.
