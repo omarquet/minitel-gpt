@@ -66,6 +66,12 @@ DESC_WORKERS = 4
 # chaque question, c'est 7 s d'attente ajoutees a celle du modele, pour un
 # horaire de conference qui ne bouge pas toutes les minutes.
 PROG_TTL = 300
+# Marque chaque description dans le texte du programme, et sert aussi a
+# detecter si AU MOINS UNE description est presente (prompt_note()) : garder
+# une seule constante evite que les deux se desynchronisent, comme quand le
+# texte litteral avait change d'un cote sans que l'autre suive.
+DESC_MARKER = "Description (a restituer telle quelle, un paragraphe par ligne) :"
+
 # Sur la fiche, la description est entre ce titre et la biographie du speaker.
 _DESC = re.compile(r"[AÀ] propos de cette session\s*(.*?)"
                    r"(?:\s*Speakers?\s|\s*Aucun speaker|$)", re.S)
@@ -130,8 +136,7 @@ def _sessions(grille, descriptions):
         lignes.append(entete)
         desc = descriptions.get(slug, "")
         if desc:
-            lignes.append("   Description (a restituer telle quelle, "
-                          "un paragraphe par ligne) :")
+            lignes.append("   " + DESC_MARKER)
             lignes += ["   " + para for para in _tronque(desc).split("\n")]
     return "\n".join(lignes)
 
@@ -302,7 +307,7 @@ def prompt_note(key=None, question=""):
     if not prog:
         return ("\n\n[Information systeme] La page du programme est injoignable "
                 "pour le moment : dis-le plutot que d'inventer des sessions.")
-    if "Description :" not in prog:
+    if DESC_MARKER not in prog:
         prog += ("\n(Les descriptions des sessions ne sont pas encore chargees. "
                  "Si on t'en demande une, dis qu'elle arrive dans un instant et "
                  "propose de reposer la question - n'affirme JAMAIS que le "
