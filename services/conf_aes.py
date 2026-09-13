@@ -585,6 +585,10 @@ GABARIT_INSTRUCTIONS = (
     "\nMar. 22 - 15:00-15:45 | Amphi Berlioz | Le titre de la session | avec: Prenom Nom, Autre Nom"
     "\nMer. 23 - 16:00-16:45 | Salle Ravel | Le titre de la suivante"
     "\n{/liste}"
+    "\n\nLes titres se recopient ENTIERS, jamais abreges ni suivis de points "
+    "de suspension : le terminal replie tout seul ce qui depasse, sur deux "
+    "lignes s'il le faut. Un titre ampute ne se reconnait plus sur le "
+    "programme affiche dans le hall."
     "\n\nN'invente pas de champ, n'en ajoute pas d'autres, et n'ecris rien "
     "d'autre a l'interieur des blocs."
 )
