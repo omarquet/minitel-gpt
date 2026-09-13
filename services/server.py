@@ -391,7 +391,8 @@ def run_session(t):
                     t.w(bytes([CR, LF]))   # sinon le prochain "> " s'accole au precedent
                     continue
                 start_at_last = (action == 'retour')
-                if show_response(t, apply_minitel_markup(last), start_at_last) in ('sommaire', 'timeout'):
+                if show_response(t, apply_minitel_markup(conf_aes.render(last)),
+                                 start_at_last) in ('sommaire', 'timeout'):
                     break
                 t.clear()
                 t.w(FG_WHITE)
@@ -415,7 +416,9 @@ def run_session(t):
                 log.error("API: %s", e)
                 answer = "Erreur de connexion. Reessayez."
 
-            if show_response(t, apply_minitel_markup(answer)) in ('sommaire', 'timeout'):
+            # render() a l'affichage seulement : l'historique garde les champs
+            # {fiche} du modele, pas les lignes deja dessinees.
+            if show_response(t, apply_minitel_markup(conf_aes.render(answer))) in ('sommaire', 'timeout'):
                 break
 
             t.w(bytes([CR, LF])); t.w(FG_WHITE)

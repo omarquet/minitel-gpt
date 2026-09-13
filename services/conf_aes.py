@@ -23,6 +23,12 @@ from pathlib import Path
 
 import requests
 
+# Sens de la dependance : conf_aes -> minitel_gpt, jamais l'inverse. Supprimer
+# ce fichier apres la conference ne laisse donc rien de casse derriere lui.
+# On y prend COLS et ART_MARK plutot que de les recopier : deux constantes
+# dupliquees, ce sont deux constantes qui divergent.
+import minitel_gpt as mg
+
 log = logging.getLogger("minitel-gpt")
 
 URL = "https://www.agileenseine.com/programme-2026/"
@@ -293,6 +299,129 @@ def warm():
     threading.Thread(target=travail, daemon=True).start()
 
 
+# --- Gabarit d'affichage des sessions -------------------------------------
+# Le modele ne dessine RIEN : il remplit des champs, c'est ce module qui rend
+# la fiche. Sans ca la mise en page changeait a chaque reponse - parfois un
+# titre en couleur, parfois une liste a puces, parfois un pave. Meme raison
+# que bound_double_size ou strip_markdown : la mise en forme ne se delegue pas
+# a un modele, seules les DONNEES viennent de lui.
+#
+# Chaque ligne rendue est prefixee par ART_MARK, le marqueur que wrap()
+# recopie telle quelle : sans lui, join_soft_wraps() recollerait un filet a un
+# titre long (une ligne pleine passe pour un repli subi) et wrap() ecraserait
+# l'alignement des champs.
+_FICHE_RE = re.compile(r"\{fiche\}(.*?)\{/fiche\}", re.S)
+_LISTE_RE = re.compile(r"\{liste\}(.*?)\{/liste\}", re.S)
+_CHAMP_RE = re.compile(r"^\s*(titre|quand|ou|avec)\s*:\s*(.*)$", re.I)
+# wrap() s'arrete une colonne avant les 40 (cf. son commentaire) : les lignes
+# fabriquees ici sont donc calibrees sur 39, sinon elles seraient tronquees.
+FICHE_COLS = mg.COLS - 1
+_ETIQUETTES = [("quand", "QUAND"), ("ou", "OU"), ("avec", "AVEC")]
+# Largeur de la colonne des etiquettes, alignee sur la plus longue ("QUAND").
+_ETIQ_W = max(len(e) for _, e in _ETIQUETTES)
+
+
+def _plier(texte, largeur, retrait=0):
+    """Coupe `texte` en lignes de `largeur` colonnes, les suivantes retraitees.
+    Rendu ici et pas par wrap(), qui refuserait de garder le retrait."""
+    lignes, courante = [], ""
+    for mot in texte.split():
+        essai = (courante + " " + mot).strip()
+        if courante and len(essai) > largeur - (retrait if lignes else 0):
+            lignes.append(courante)
+            courante = mot
+        else:
+            courante = essai
+    if courante:
+        lignes.append(courante)
+    return [lignes[0]] + [" " * retrait + ln for ln in lignes[1:]] if lignes else []
+
+
+def _champs(bloc):
+    """Lignes "champ: valeur" d'un bloc -> dict. Ce que le modele ecrit a
+    cote (phrase d'introduction, champ invente) est ignore, jamais affiche."""
+    trouves = {}
+    for ligne in bloc.split("\n"):
+        m = _CHAMP_RE.match(ligne)
+        if m and m.group(2).strip():
+            trouves[m.group(1).lower()] = m.group(2).strip()
+    return trouves
+
+
+def _rendre_fiche(m):
+    """Une session -> fiche encadree, champs alignes. Cf. _FICHE_RE."""
+    ch = _champs(m.group(1))
+    if not ch.get("titre"):
+        return ""                     # sans titre, il n'y a pas de fiche a faire
+    filet = "=" * FICHE_COLS
+    lignes = ["{cyan}" + filet + "{/}"]
+    for ln in _plier(ch["titre"].upper(), FICHE_COLS):
+        lignes.append("{cyan}" + ln + "{/}")
+    lignes.append("{cyan}" + filet + "{/}")
+    for clef, etiquette in _ETIQUETTES:
+        if not ch.get(clef):
+            continue
+        retrait = _ETIQ_W + 3         # "QUAND : " -> alignement des suites
+        plies = _plier(ch[clef], FICHE_COLS - retrait)
+        premiere = f"{{jaune}}{etiquette:<{_ETIQ_W}}{{/}} : {plies[0]}"
+        lignes.append(premiere)
+        lignes += [" " * retrait + ln.lstrip() for ln in plies[1:]]
+    return "\n".join(mg.ART_MARK + ln for ln in lignes)
+
+
+def _rendre_liste(m):
+    """Plusieurs sessions -> deux lignes chacune : horaire et salle en jaune,
+    puis le titre en entier. Une session par ligne du bloc, champs separes par
+    des barres verticales : "15:00-15:45 | Amphi Berlioz | Titre"."""
+    lignes = []
+    for ligne in m.group(1).split("\n"):
+        bouts = [b.strip() for b in ligne.split("|")]
+        bouts = [b for b in bouts if b]
+        if len(bouts) < 2:
+            continue                  # ligne vide ou inexploitable : on la saute
+        titre = bouts[-1]
+        entete = "  ".join(bouts[:-1])
+        if lignes:
+            lignes.append("")         # une ligne vide entre deux sessions
+        lignes.append("{jaune}" + entete[:FICHE_COLS] + "{/}")
+        lignes += _plier(titre, FICHE_COLS)
+    return "\n".join(mg.ART_MARK + ln for ln in lignes)
+
+
+def render(texte):
+    """Remplace les blocs {fiche} et {liste} de la reponse par leur rendu.
+
+    A appeler a l'AFFICHAGE, pas avant de ranger la reponse dans l'historique :
+    le modele doit relire ses propres champs, pas des lignes deja dessinees."""
+    if not texte:
+        return texte
+    return _LISTE_RE.sub(_rendre_liste, _FICHE_RE.sub(_rendre_fiche, texte))
+
+
+GABARIT_INSTRUCTIONS = (
+    "\n\nAFFICHAGE DES SESSIONS. Tu ne dessines jamais la mise en page toi-meme "
+    "(pas de filets, pas de tirets, pas de couleurs autour d'une session) : tu "
+    "remplis un gabarit, le terminal s'occupe du reste et le rend identique a "
+    "chaque fois."
+    "\n\nPour UNE session, ecris exactement ceci, un champ par ligne :"
+    "\n{fiche}"
+    "\ntitre: le titre de la session"
+    "\nquand: le jour et l'horaire"
+    "\nou: la salle"
+    "\navec: les intervenants, separes par des virgules"
+    "\n{/fiche}"
+    "\nPuis, APRES le bloc, le resume de la session en texte normal."
+    "\n\nPour PLUSIEURS sessions, une par ligne, horaire et salle avant le "
+    "titre, separes par des barres verticales :"
+    "\n{liste}"
+    "\n15:00-15:45 | Amphi Berlioz | Le titre de la session"
+    "\n16:00-16:45 | Salle Ravel | Le titre de la suivante"
+    "\n{/liste}"
+    "\n\nN'invente pas de champ, n'en ajoute pas d'autres, et n'ecris rien "
+    "d'autre a l'interieur des blocs."
+)
+
+
 def prompt_note(key=None, question=""):
     """Bloc a ajouter au prompt systeme : l'heure qu'il est, puis le programme.
     Chaine vide si la question ne concerne pas Agile en Seine.
@@ -316,4 +445,5 @@ def prompt_note(key=None, question=""):
     return (f"\n\n[Information systeme] Il est {now.hour}h{now.minute:02d}, "
             f"heure de Paris.\n"
             "PROGRAMME OFFICIEL DE LA CONFERENCE (il fait autorite, c'est ta "
-            "seule source sur les sessions) :\n" + prog)
+            "seule source sur les sessions) :\n" + prog
+            + GABARIT_INSTRUCTIONS)

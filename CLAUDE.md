@@ -45,7 +45,8 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
 - `services/conf_aes.py` — **tout Agile en Seine, et rien d'autre**, isolé
   exprès pour être supprimable d'un bloc quand la conférence sera passée
   (effacer le fichier, les deux appels à `prompt_note()` dans `server.py` et
-  `admin_ui.py`, la personnalité `agile_en_seine`, son `.txt` et la ligne
+  `admin_ui.py`, les deux `conf_aes.render()` de `server.py`, la personnalité
+  `agile_en_seine`, son `.txt` et la ligne
   `config/aes_descriptions.json` du `.gitignore`). C'est la seule fenêtre du
   projet sur le web en temps réel : le programme change jusqu'au dernier
   moment, donc la page officielle est relue régulièrement - le contexte est
@@ -298,6 +299,23 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   `modified` n'ayant pas bougé (c'est ce qui serait arrivé en passant des
   extraits de 320 caractères au texte entier, puis du texte aplati au texte
   en paragraphes).
+- **La mise en page des sessions AES est rendue en Python, pas par le modèle**
+  (`conf_aes.render()`, appelé à l'affichage dans `server.py`). Le modèle ne
+  fournit que des **champs** — `{fiche}` avec `titre:`/`quand:`/`ou:`/`avec:`,
+  ou `{liste}` avec une session par ligne — et le module dessine la fiche
+  encadrée (choix retenu) ou la liste à deux lignes par session. Laissé libre,
+  le modèle recomposait la présentation à chaque réponse : filets une fois sur
+  deux, couleurs variables, champs dans le désordre. Deux points à connaître :
+  chaque ligne rendue est préfixée par **`ART_MARK`**, sans quoi
+  `join_soft_wraps()` recollerait un filet au titre qui le suit (une ligne
+  pleine passe pour un repli subi) et `wrap()` écraserait l'alignement des
+  champs ; et `render()` s'applique **à l'affichage seulement**, jamais avant
+  de ranger la réponse dans l'historique, pour que le modèle relise ses propres
+  champs et non des lignes déjà dessinées. Ce qu'il écrit à côté du gabarit
+  (champ inventé, phrase parasite dans le bloc) est ignoré, et un bloc sans
+  `titre:` ne produit aucune fiche plutôt qu'un cadre vide. Dans l'aperçu de
+  l'admin, les blocs restent visibles tels quels, comme `{rouge}...{/}` :
+  c'est un aperçu texte brut, pas un écran Minitel.
 - **Les descriptions gardent leurs paragraphes** (`_texte(..., paragraphes=True)`).
   Le nettoyage HTML général écrase tous les blancs, ce qui est juste pour une
   carte du programme - elle doit tenir sur UNE ligne - et faux pour une
