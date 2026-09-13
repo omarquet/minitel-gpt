@@ -313,7 +313,13 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   de ranger la réponse dans l'historique, pour que le modèle relise ses propres
   champs et non des lignes déjà dessinées. Ce qu'il écrit à côté du gabarit
   (champ inventé, phrase parasite dans le bloc) est ignoré, et un bloc sans
-  `titre:` ne produit aucune fiche plutôt qu'un cadre vide. Dans l'aperçu de
+  `titre:` ne produit aucune fiche plutôt qu'un cadre vide. Deux garde-fous
+  ajoutés après coup, sur des comportements constatés à l'écran : les consignes
+  sont placées **avant** le programme (~75 ko de descriptions — une consigne
+  posée derrière un tel pavé se fait oublier, le modèle reprenait la forme du
+  gabarit sans le bloc), avec un rappel d'une ligne après ; et une ligne à deux
+  barres verticales laissée **hors** d'un bloc est rendue quand même comme une
+  entrée de liste, la barre verticale n'appartenant pas au français courant. Dans l'aperçu de
   l'admin, les blocs restent visibles tels quels, comme `{rouge}...{/}` :
   c'est un aperçu texte brut, pas un écran Minitel.
 - **Les descriptions gardent leurs paragraphes** (`_texte(..., paragraphes=True)`).

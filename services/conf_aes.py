@@ -377,23 +377,46 @@ def _rendre_fiche(m):
     return "\n".join(mg.ART_MARK + ln for ln in lignes)
 
 
+def _entree_liste(ligne):
+    """Une session "quand | salle | titre" -> ses deux lignes d'ecran."""
+    bouts = [b.strip() for b in ligne.split("|") if b.strip()]
+    if len(bouts) < 2:
+        return []                     # ligne vide ou inexploitable
+    # L'en-tete est PLIE, pas tronque : le modele ecrit parfois un "quand"
+    # bavard ("Jour 1 (mardi 22), 15:00 - 15:45") qui, ajoute a la salle,
+    # depassait les 39 colonnes et finissait coupe en plein mot ("Amphi").
+    entete = "  ".join(bouts[:-1])
+    return (["{jaune}" + ln + "{/}" for ln in _plier(entete, FICHE_COLS)]
+            + _plier(bouts[-1], FICHE_COLS))
+
+
 def _rendre_liste(m):
-    """Plusieurs sessions -> deux lignes chacune : horaire et salle en jaune,
+    """Plusieurs sessions -> deux lignes chacune : quand et salle en jaune,
     puis le titre en entier. Une session par ligne du bloc, champs separes par
-    des barres verticales : "15:00-15:45 | Amphi Berlioz | Titre"."""
+    des barres verticales : "Mar. 22 - 15:00-15:45 | Amphi Berlioz | Titre"."""
     lignes = []
     for ligne in m.group(1).split("\n"):
-        bouts = [b.strip() for b in ligne.split("|")]
-        bouts = [b for b in bouts if b]
-        if len(bouts) < 2:
-            continue                  # ligne vide ou inexploitable : on la saute
-        titre = bouts[-1]
-        entete = "  ".join(bouts[:-1])
+        entree = _entree_liste(ligne)
+        if not entree:
+            continue
         if lignes:
             lignes.append("")         # une ligne vide entre deux sessions
-        lignes.append("{jaune}" + entete[:FICHE_COLS] + "{/}")
-        lignes += _plier(titre, FICHE_COLS)
+        lignes += entree
     return "\n".join(mg.ART_MARK + ln for ln in lignes)
+
+
+# Filet de securite : le modele reprend parfois la FORME du gabarit (les barres
+# verticales) sans le bloc qui l'entoure, et la ligne s'affiche alors brute,
+# barres comprises ("- Jour 1 (mardi 22), 15:00 - 15:45 | Amphitheatre Berlioz
+# | L'IA va obliger...", vu a l'ecran). Une ligne a deux barres est une session
+# quoi qu'il arrive : on la rend comme si elle etait dans un {liste}. La barre
+# verticale n'appartient pas au francais courant, le faux positif est theorique.
+_LIGNE_PIPE_RE = re.compile(r"^[ \t]*[-*]?[ \t]*([^|\n]+\|[^|\n]+\|[^\n]+)$", re.M)
+
+
+def _rendre_ligne_orpheline(m):
+    lignes = _entree_liste(m.group(1))
+    return "\n".join(mg.ART_MARK + ln for ln in lignes) if lignes else m.group(0)
 
 
 def render(texte):
@@ -403,7 +426,10 @@ def render(texte):
     le modele doit relire ses propres champs, pas des lignes deja dessinees."""
     if not texte:
         return texte
-    return _LISTE_RE.sub(_rendre_liste, _FICHE_RE.sub(_rendre_fiche, texte))
+    texte = _LISTE_RE.sub(_rendre_liste, _FICHE_RE.sub(_rendre_fiche, texte))
+    # Apres les blocs : ce qui reste avec des barres n'a pas ete encadre. Les
+    # lignes deja rendues commencent par ART_MARK, la regex ne les reprend pas.
+    return _LIGNE_PIPE_RE.sub(_rendre_ligne_orpheline, texte)
 
 
 LECTURE_INSTRUCTIONS = (
@@ -423,10 +449,13 @@ LECTURE_INSTRUCTIONS = (
 )
 
 GABARIT_INSTRUCTIONS = (
-    "\n\nAFFICHAGE DES SESSIONS. Tu ne dessines jamais la mise en page toi-meme "
-    "(pas de filets, pas de tirets, pas de couleurs autour d'une session) : tu "
-    "remplis un gabarit, le terminal s'occupe du reste et le rend identique a "
-    "chaque fois."
+    "\n\nAFFICHAGE DES SESSIONS. **Toute session que tu cites passe par un "
+    "bloc, sans exception** - y compris un resultat de recherche, et y compris "
+    "quand tu n'en cites qu'une. UNE session : {fiche}. DEUX OU PLUS : "
+    "{liste}. En dehors d'un bloc, jamais de tiret en debut de ligne pour une "
+    "session, jamais de barre verticale, jamais de filet ni de couleur : tu "
+    "remplis un gabarit, le terminal dessine, et le rend identique a chaque "
+    "fois."
     "\n\nPour UNE session, ecris exactement ceci, un champ par ligne :"
     "\n{fiche}"
     "\ntitre: le titre de la session"
@@ -467,8 +496,13 @@ def prompt_note(key=None, question=""):
                  "propose de reposer la question - n'affirme JAMAIS que le "
                  "programme ne contient pas de resume.)")
     now = datetime.now()
+    # Consignes AVANT le programme, rappel APRES : le programme fait ~75 ko
+    # (les descriptions entieres), et une consigne posee derriere un tel pave
+    # se fait oublier - le modele reprenait la forme du gabarit sans le bloc.
     return (f"\n\n[Information systeme] Il est {now.hour}h{now.minute:02d}, "
-            f"heure de Paris.\n"
-            "PROGRAMME OFFICIEL DE LA CONFERENCE (il fait autorite, c'est ta "
-            "seule source sur les sessions) :\n" + prog
-            + LECTURE_INSTRUCTIONS + GABARIT_INSTRUCTIONS)
+            f"heure de Paris."
+            + LECTURE_INSTRUCTIONS + GABARIT_INSTRUCTIONS
+            + "\n\nPROGRAMME OFFICIEL DE LA CONFERENCE (il fait autorite, "
+              "c'est ta seule source sur les sessions) :\n" + prog
+            + "\n\n[Rappel] Une session citee = un bloc {fiche} (une seule) ou "
+              "{liste} (plusieurs). Jamais de barre verticale hors d'un bloc.")
