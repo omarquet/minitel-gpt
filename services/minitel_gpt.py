@@ -456,7 +456,30 @@ MINITEL_MARKUP_TAGS = {
     "grand": DBL_SIZE,
 }
 MINITEL_MARKUP_RESET = FG_WHITE + SZ_NORMAL
-_MINITEL_MARKUP_RE = re.compile(r"\{(/|[a-z]+)\}")
+# Ce que le modele ecrit REELLEMENT. `\{[a-z]+\}` ne reconnaissait que la forme
+# exacte de la consigne : {Cyan}, { cyan }, {en cyan} ou un {/art} orphelin ne
+# correspondaient a rien et ressortaient TELS QUELS a l'ecran (vu en production
+# sur une session Agile en Seine : "{m cyan}Mercredi 23 septembre"). On accepte
+# donc toute accolade courte qui ressemble a une balise - lettres, espaces,
+# tirets et barre de fraction, rien d'autre - et on y cherche un mot connu. Une
+# accolade qui contient autre chose (deux points, chiffres : "{cle: valeur}")
+# n'est pas une balise et reste affichee telle quelle.
+_MINITEL_MARKUP_RE = re.compile(r"\{\s*(/|/?[A-Za-z][A-Za-z /-]{0,22}?)\s*\}")
+
+
+def _markup_code(contenu):
+    """Code Videotex d'une balise, ou None si rien n'y est reconnaissable.
+
+    Tolerant a dessein : le modele ne suit pas la consigne au caractere pres,
+    pas plus ici que pour le Markdown (cf. strip_markdown). Une balise qu'on
+    ne reconnait pas est JETEE par l'appelant, jamais affichee."""
+    if contenu.startswith("/"):                  # {/}, mais aussi {/art}, {/grand}
+        return MINITEL_MARKUP_RESET
+    for mot in re.findall(r"[a-z]+", contenu.lower()):
+        code = MINITEL_MARKUP_TAGS.get(mot)
+        if code:
+            return code
+    return None
 
 # Un {grand} laisse ouvert divise par deux la largeur utile : 2 colonnes par
 # caractere, donc ~19 caracteres par ligne au lieu de 39. Le texte part alors
@@ -541,10 +564,7 @@ def apply_minitel_markup(text):
     if not text:
         return text
     def repl(m):
-        tag = m.group(1)
-        if tag == "/":
-            return MINITEL_MARKUP_RESET.decode("latin1")
-        code = MINITEL_MARKUP_TAGS.get(tag)
+        code = _markup_code(m.group(1))
         return code.decode("latin1") if code else ""
     return _MINITEL_MARKUP_RE.sub(repl, bound_double_size(text))
 
