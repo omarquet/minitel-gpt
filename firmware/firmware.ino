@@ -199,7 +199,12 @@ HardwareSerial Minitel(1);
 #define CODE_PRISE_EM  0x53   // emission prise peri-informatique
 #define CODE_PRISE_REC 0x5B   // reception prise peri-informatique
 
+// Date du dernier octet envoye au Minitel. Sert au battement de coeur plus
+// bas : seule une ligne SILENCIEUSE doit en recevoir un.
+static unsigned long dernierEnvoiMinitelMs = 0;
+
 void aiguillage(uint8_t recepteur, uint8_t emetteur) {
+  dernierEnvoiMinitelMs = millis();
   Minitel.write(0x1B);         // ESC
   Minitel.write(PRO3);
   Minitel.write(AIGUILLAGE_ON);
@@ -234,6 +239,25 @@ void ouvrirFenetreAiguillage() {
   forceModeUntilMs = millis() + FORCE_MODE_WINDOW_MS;
   forcerModePeriInformatique();          // premier envoi immediat
   lastForceModeMs = millis();            // les suivants passent par idleTick()/loop()
+}
+
+
+// Le Minitel eteint son ecran quand plus aucun caractere ne lui parvient. La
+// STUM 2 documente ce mecanisme avec un delai de trois heures ; celui du
+// montage s'endort en cinq a dix minutes, et une session ou personne ne tape
+// laisse la ligne parfaitement muette bien plus longtemps que ca. Un octet
+// suffit a reculer l'echeance : NUL est un caractere de remplissage Videotex,
+// sans aucun effet a l'ecran.
+//
+// La condition "rien envoye depuis VEILLE_KEEPALIVE_MS" garantit qu'on ne
+// s'insere jamais au milieu d'une sequence d'echappement du serveur : par
+// construction, on n'ecrit que sur une ligne au repos.
+#define VEILLE_KEEPALIVE_MS 120000   // 2 min
+
+void maybeReveilMinitel() {
+  if (millis() - dernierEnvoiMinitelMs < VEILLE_KEEPALIVE_MS) return;
+  Minitel.write((uint8_t) 0x00);
+  dernierEnvoiMinitelMs = millis();
 }
 
 
@@ -333,6 +357,7 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
       Serial.println(length > 16 ? " ..." : "");
 #endif
       Minitel.write(payload, length);
+      dernierEnvoiMinitelMs = millis();
       break;
     default:
       break;
@@ -364,8 +389,9 @@ static unsigned long scanDate = 0;
 #define SCAN_FRAIS_MS 60000
 static uint8_t netCount = 0;
 
-void mnClear() { Minitel.write(0x0C); }                  // FF : efface l'ecran
+void mnClear() { dernierEnvoiMinitelMs = millis(); Minitel.write(0x0C); }
 void mnLine(const char* s = "") {
+  dernierEnvoiMinitelMs = millis();
   Minitel.print(s); Minitel.write(0x0D); Minitel.write(0x0A);
 }
 
@@ -431,7 +457,11 @@ void checkResetButton() {
 // les tentatives d'aiguillage se poursuivent meme si le WiFi met du temps a
 // se connecter (l'ecran de configuration peut a lui seul tenir plusieurs
 // dizaines de secondes, largement au-dela de FORCE_MODE_WINDOW_MS sinon).
-void idleTick() { updateStatusLed(); checkResetButton(); maybeForceModePeriInformatique(); delay(5); }
+void idleTick() {
+  updateStatusLed(); checkResetButton();
+  maybeForceModePeriInformatique(); maybeReveilMinitel();
+  delay(5);
+}
 
 // Pourquoi une connexion echoue. Sans cette raison, le journal disait "pas de
 // reponse" pour TOUT - mot de passe faux, reseau absent, box qui refuse - et il
@@ -872,6 +902,7 @@ void loop() {
   updateStatusLed();
   checkResetButton();                         // apres la LED : l'appui la fige
   maybeForceModePeriInformatique();
+  maybeReveilMinitel();
   // Appui bref alors que tout va bien : sans effet, mais on l'oublie pour
   // qu'il ne surgisse pas au prochain passage par la configuration.
   if (setupRequested) {
