@@ -53,6 +53,8 @@
     border: 1px solid var(--line); background: var(--card); color: var(--fg);
   }
   button.big:active { opacity: .6; }
+  /* Grise = tout est deja transmis. Voir render(). */
+  button.big:disabled { opacity: .3; }
   button.primary { grid-column: 1 / -1; background: #14532d; border-color: #2c7a4b; }
   button.envoi { background: #1e3a5f; border-color: #3d6a99; }
   #log { margin-top: 12px; font-size: 13px; color: var(--dim); min-height: 18px; }
@@ -167,6 +169,7 @@ const preview = document.getElementById('preview');
 const count = document.getElementById('count');
 const banner = document.getElementById('banner');
 const logEl = document.getElementById('log');
+const bSend = document.getElementById('bSend');
 
 let sent = '';              // ce qui est déjà affiché sur le Minitel
 let mode = 'valider';       // 'direct' | 'valider'
@@ -198,6 +201,13 @@ function note(msg) { logEl.textContent = msg; }
 
 function render() {
   const n = toAscii(ta.value);
+  // "Envoyer" n'est actif que s'il reste quelque chose a transmettre. En mode
+  // Direct tout part tout seul 250 ms apres la derniere frappe : le bouton y
+  // est donc gris en marche normale, et ce gris dit "tout est passe" - une
+  // information que rien d'autre ne donnait. Il se rallume des qu'un envoi
+  // echoue (pas de session, serveur injoignable) : c'est alors le bouton
+  // "reessayer", sans changer ni de nom ni de place.
+  bSend.disabled = (n === sent);
   preview.textContent = n || '(vide)';
   count.textContent = n.length + ' car.';
   // 18 lignes de contenu utiles sur 40 colonnes : au-delà, la saisie
@@ -253,7 +263,7 @@ function sync() {
     const target = toAscii(ta.value);
     if (target === sent) return true;
     const ok = await send(diff(sent, target));
-    if (ok) sent = target;
+    if (ok) { sent = target; render(); }
     return ok;
   });
 }
@@ -270,7 +280,7 @@ function effacer() {
   return enqueue(async () => {
     if (!sent.length) { note('Zone de texte vidée.'); return true; }
     const ok = await send({ back: sent.length });
-    if (ok) { sent = ''; note('Ligne effacée sur le Minitel.'); }
+    if (ok) { sent = ''; render(); note('Ligne effacée sur le Minitel.'); }
     return ok;
   });
 }
