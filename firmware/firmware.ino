@@ -166,6 +166,9 @@ static String usedSsid, usedPass;
 // Delai laisse a chaque reseau avant de passer au suivant. Assez long pour un
 // DHCP lent, assez court pour faire le tour d'une liste de trois sans lasser.
 #define WIFI_TRY_MS 12000
+// Reseau absent du dernier scan : il peut etre a SSID cache, donc on l'essaie
+// quand meme - mais sans y consacrer les 12 s d'un reseau qu'on a vu.
+#define WIFI_TRY_ABSENT_MS 4000
 
 #define MINITEL_RX 4    // ESP32-C3 RX  <- Minitel TX (broche DIN 3)
 #define MINITEL_TX 5    // ESP32-C3 TX  -> Minitel RX (broche DIN 1)
@@ -218,6 +221,17 @@ void forcerModePeriInformatique() {
 #define FORCE_MODE_PERIOD_MS 500    // intervalle entre deux tentatives
 static unsigned long forceModeUntilMs = 0;
 static unsigned long lastForceModeMs = 0;
+
+// A appeler quand on s'apprete a ECRIRE sur le Minitel, et seulement la :
+// avant l'ecran de configuration, et une fois le WiFi obtenu. Tant qu'on
+// cherche un reseau, le terminal ne doit pas etre touche - on n'a rien a lui
+// montrer, et le basculer pour rien lui fait perdre l'affichage qu'il avait.
+void ouvrirFenetreAiguillage() {
+  forceModeUntilMs = millis() + FORCE_MODE_WINDOW_MS;
+  forcerModePeriInformatique();          // premier envoi immediat
+  lastForceModeMs = millis();            // les suivants passent par idleTick()/loop()
+}
+
 
 void maybeForceModePeriInformatique() {
   if (millis() >= forceModeUntilMs) return;
@@ -336,6 +350,17 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
 #define SETUP_IDLE_MS 120000     // sans frappe : on repart tenter les reseaux connus
 static String netSsid[MAX_NETS];
 static int8_t netRssi[MAX_NETS];
+// Nombre de bornes diffusant ce meme nom. Un reseau maille en compte plusieurs,
+// et c'est une cause classique d'association qui n'aboutit pas : la carte vise
+// le nom, pas la borne, et peut s'adresser a la plus lointaine.
+static uint8_t netBornes[MAX_NETS];
+// Identifiant materiel et canal de la MEILLEURE borne de ce reseau. C'est ce
+// qui permet de viser une borne precise au lieu d'un nom (voir indexScan).
+static uint8_t netBssid[MAX_NETS][6];
+static int32_t netCanal[MAX_NETS];
+// Date du dernier scan : le ciblage n'a de sens qu'avec un releve recent.
+static unsigned long scanDate = 0;
+#define SCAN_FRAIS_MS 60000
 static uint8_t netCount = 0;
 
 void mnClear() { Minitel.write(0x0C); }                  // FF : efface l'ecran
@@ -414,14 +439,20 @@ void idleTick() { updateStatusLed(); checkResetButton(); maybeForceModePeriInfor
 static volatile uint8_t derniereRaisonWifi = 0;
 
 void onWifiEvent(WiFiEvent_t evt, WiFiEventInfo_t info) {
-  if (evt == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
-    derniereRaisonWifi = info.wifi_sta_disconnected.reason;
-  }
+  if (evt != ARDUINO_EVENT_WIFI_STA_DISCONNECTED) return;
+  uint8_t r = info.wifi_sta_disconnected.reason;
+  // 36 (STA_LEAVING) et 8 (ASSOC_LEAVE), c'est NOUS qui partons : le
+  // WiFi.disconnect() pose avant chaque tentative emet cet evenement. Le
+  // retenir affichait notre propre depart comme si la box avait refuse -
+  // "raison 36" sur deux essais de suite, alors qu'aucun refus n'etait venu.
+  if (r == WIFI_REASON_STA_LEAVING || r == WIFI_REASON_ASSOC_LEAVE) return;
+  derniereRaisonWifi = r;
 }
 
 const char* raisonWifi(uint8_t r) {
   switch (r) {
-    case 0:   return "aucune reponse du point d'acces";
+    case 0:   return "AUCUN refus recu : le point d'acces n'a jamais repondu "
+                     "(emission de la carte ? antenne ?)";
     case WIFI_REASON_AUTH_EXPIRE:            return "authentification expiree";
     case WIFI_REASON_ASSOC_EXPIRE:           return "association expiree";
     case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT: return "MOT DE PASSE refuse (handshake)";
@@ -443,11 +474,37 @@ const char* raisonWifi(uint8_t r) {
 // silence. Le reseau suivant de la liste n'etait alors jamais essaye : il
 // echouait seulement au bout de son delai. Couper la radio annule la tentative
 // en cours ; c'est deja ce que fait scanNets() avant de scanner.
+// Ce reseau figure-t-il dans le dernier scan, et est-il assez recent pour
+// qu'on s'y fie ? Retourne son index, ou -1.
+int indexScan(const char* ssid) {
+  if (!scanDate || millis() - scanDate > SCAN_FRAIS_MS) return -1;
+  for (uint8_t i = 0; i < netCount; i++)
+    if (netSsid[i] == ssid) return i;
+  return -1;
+}
+
+
 void demarrerConnexion(const char* ssid, const char* pass) {
-  derniereRaisonWifi = 0;           // la raison qui suivra sera celle de CET essai
   WiFi.disconnect(true);            // true = radio coupee
   delay(100);                       // laisser la pile se ranger
   WiFi.mode(WIFI_STA);              // la radio revient en station
+  derniereRaisonWifi = 0;           // APRES l'arret : notre propre depart ne compte pas
+  // Viser la BORNE, pas seulement le nom. Une carte WiFi qui ne connait que le
+  // nom choisit elle-meme sa borne, et sur un reseau MAILLE - plusieurs bornes
+  // sous un meme nom - elle s'adresse parfois a la plus lointaine pendant
+  // qu'elle en entend une proche : l'association expire sans explication
+  // (raison 4, constate sur ce montage). Le scan nous a donne la plus forte :
+  // on la designe par son identifiant materiel et son canal.
+  int k = indexScan(ssid);
+  if (k >= 0) {
+    Serial.printf("        borne visee %02X:%02X:%02X:%02X:%02X:%02X canal %d "
+                  "(%d dBm%s)\n",
+                  netBssid[k][0], netBssid[k][1], netBssid[k][2], netBssid[k][3],
+                  netBssid[k][4], netBssid[k][5], (int) netCanal[k], netRssi[k],
+                  netBornes[k] > 1 ? ", reseau maille" : "");
+    WiFi.begin(ssid, pass, netCanal[k], netBssid[k]);
+    return;
+  }
   WiFi.begin(ssid, pass);
 }
 
@@ -507,7 +564,12 @@ void scanNets() {
     bool dup = false;
     for (uint8_t j = 0; j < netCount; j++) {
       if (netSsid[j] == ssid) {                          // meme reseau, autre borne
-        if (rssi > netRssi[j]) netRssi[j] = rssi;
+        if (rssi > netRssi[j]) {                         // on garde la plus forte
+          netRssi[j] = rssi;
+          memcpy(netBssid[j], WiFi.BSSID(i), 6);
+          netCanal[j] = WiFi.channel(i);
+        }
+        netBornes[j]++;
         dup = true;
         break;
       }
@@ -518,21 +580,42 @@ void scanNets() {
       for (uint8_t j = 1; j < netCount; j++)             // s'il bat le plus faible
         if (netRssi[j] < netRssi[faible]) faible = j;
       if (rssi <= netRssi[faible]) continue;
-      netSsid[faible] = ssid; netRssi[faible] = rssi;
+      netSsid[faible] = ssid; netRssi[faible] = rssi; netBornes[faible] = 1;
+      memcpy(netBssid[faible], WiFi.BSSID(i), 6); netCanal[faible] = WiFi.channel(i);
       continue;
     }
-    netSsid[netCount] = ssid; netRssi[netCount] = rssi; netCount++;
+    netSsid[netCount] = ssid; netRssi[netCount] = rssi; netBornes[netCount] = 1;
+    memcpy(netBssid[netCount], WiFi.BSSID(i), 6); netCanal[netCount] = WiFi.channel(i);
+    netCount++;
   }
   WiFi.scanDelete();
-  for (uint8_t i = 1; i < netCount; i++) {               // tri par insertion
-    String ssid = netSsid[i]; int8_t rssi = netRssi[i];
+  scanDate = millis();
+  // Tri par insertion. Les trois tableaux decrivent le MEME reseau a un index
+  // donne : ils se deplacent ensemble, sinon un nom se retrouve avec le nombre
+  // de bornes d'un autre.
+  for (uint8_t i = 1; i < netCount; i++) {
+    String ssid = netSsid[i]; int8_t rssi = netRssi[i]; uint8_t bornes = netBornes[i];
+    uint8_t bssid[6]; memcpy(bssid, netBssid[i], 6); int32_t canal = netCanal[i];
     int8_t j = i - 1;
     while (j >= 0 && netRssi[j] < rssi) {
-      netSsid[j + 1] = netSsid[j]; netRssi[j + 1] = netRssi[j]; j--;
+      netSsid[j + 1] = netSsid[j]; netRssi[j + 1] = netRssi[j];
+      netBornes[j + 1] = netBornes[j];
+      memcpy(netBssid[j + 1], netBssid[j], 6); netCanal[j + 1] = netCanal[j]; j--;
     }
-    netSsid[j + 1] = ssid; netRssi[j + 1] = rssi;
+    netSsid[j + 1] = ssid; netRssi[j + 1] = rssi; netBornes[j + 1] = bornes;
+    memcpy(netBssid[j + 1], bssid, 6); netCanal[j + 1] = canal;
   }
+  // La LISTE, pas seulement le compte. Sans elle, "3 reseaux distincts" ne dit
+  // pas si celui qu'on cherche est la : impossible de distinguer un reseau hors
+  // de portee d'un mot de passe refuse. Et quand la prise DIN n'est pas
+  // branchee, l'ecran de configuration est invisible - le journal est alors la
+  // seule fenetre sur ce que la carte voit reellement.
   Serial.printf("[WiFi] scan : %d entrees -> %u reseaux distincts\n", n, netCount);
+  for (uint8_t i = 0; i < netCount; i++) {
+    Serial.printf("        %-32s %4d dBm  %-4s %s\n", netSsid[i].c_str(), netRssi[i],
+                  stars(netRssi[i]),
+                  netBornes[i] > 1 ? "(plusieurs bornes : reseau maille)" : "");
+  }
 }
 
 void showList(uint8_t page, uint8_t pages) {
@@ -602,6 +685,7 @@ bool askPassword(const String& ssid, String& out) {
 // devant un menu que personne ne lit.
 bool wifiSetupOnMinitel() {
   setupRequested = false;
+  ouvrirFenetreAiguillage();      // on va ecrire sur le Minitel : il doit ecouter
   scanNets();
   // Meme sans un seul reseau detecte, on AFFICHE l'ecran : partir en silence,
   // c'etait laisser le visiteur devant un boitier qui clignote sans rien dire.
@@ -658,9 +742,18 @@ bool wifiSetupOnMinitel() {
 // repond. La LED continue de clignoter pendant l'attente : sans moniteur
 // serie, c'est le seul signe de vie.
 bool connectKnown() {
+  // Scanner d'abord, pour deux raisons : viser la bonne borne (voir
+  // demarrerConnexion), et ne pas perdre 12 s sur un reseau qui n'est meme pas
+  // la - de retour a la maison, deux des trois entrees de secrets.h sont hors
+  // de portee et coutaient 24 s a chaque demarrage. Un reseau absent du scan
+  // reste essaye, mais brievement : il peut etre a SSID cache.
+  if (millis() - scanDate > SCAN_FRAIS_MS || !scanDate) scanNets();
   for (uint8_t i = 0; i < KNOWN_COUNT; i++) {
-    Serial.printf("[WiFi] essai %u/%u : %s\n", i + 1, KNOWN_COUNT, KNOWN_NETS[i].ssid);
-    if (tryConnect(KNOWN_NETS[i].ssid, KNOWN_NETS[i].pass, WIFI_TRY_MS)) return true;
+    bool vu = indexScan(KNOWN_NETS[i].ssid) >= 0;
+    Serial.printf("[WiFi] essai %u/%u : %s%s\n", i + 1, KNOWN_COUNT,
+                  KNOWN_NETS[i].ssid, vu ? "" : " (absent du scan, essai bref)");
+    if (tryConnect(KNOWN_NETS[i].ssid, KNOWN_NETS[i].pass,
+                   vu ? WIFI_TRY_MS : WIFI_TRY_ABSENT_MS)) return true;
     Serial.printf(" -> echec : %s (raison %u)\n",
                   raisonWifi(derniereRaisonWifi), derniereRaisonWifi);
   }
@@ -674,9 +767,8 @@ void setup() {
   unsigned long t0 = millis();
   while (!Serial && millis() - t0 < 2000) delay(10);
   Minitel.begin(1200, SERIAL_7E1, MINITEL_RX, MINITEL_TX);
-  forceModeUntilMs = millis() + FORCE_MODE_WINDOW_MS;
-  forcerModePeriInformatique();          // premier envoi immediat
-  lastForceModeMs = millis();            // les suivants passent par idleTick()/loop()
+  // Pas d'aiguillage ici : tant qu'il n'y a pas de WiFi, on n'a rien a afficher.
+  // Il est ouvert plus bas, aux deux seuls moments ou le Minitel sert vraiment.
 
   // Cause du dernier demarrage : distingue un redemarrage volontaire du filet
   // WiFi (SW) d'un plantage (PANIC), d'un watchdog, ou d'une alimentation qui
@@ -714,6 +806,13 @@ void setup() {
   digitalWrite(STATUS_LED, LED_OFF);
   pinMode(BOOT_BTN, INPUT_PULLUP);            // lu seulement apres le boot
   WiFi.onEvent(onWifiEvent);                  // pour connaitre la raison des echecs
+  // L'adresse MAC de la carte. Sans elle, impossible de verifier si la box la
+  // bloque : un filtrage MAC ou un "controle d'acces" fait expirer
+  // l'authentification (raison 2) sans jamais rien refuser explicitement - le
+  // point d'acces se contente d'ignorer un inconnu. C'est aussi ce qu'il faut
+  // chercher dans la liste des appareils de la box.
+  WiFi.mode(WIFI_STA);
+  Serial.printf("[WiFi] adresse MAC de cette carte : %s\n", WiFi.macAddress().c_str());
 
 #if DEBUG_UART
   // Test du sens ESP32 -> Minitel, independant du WiFi et du serveur : on
@@ -740,6 +839,7 @@ void setup() {
   }
   Serial.printf("[WiFi] OK sur %s, IP %s\n", WiFi.SSID().c_str(),
                 WiFi.localIP().toString().c_str());
+  ouvrirFenetreAiguillage();      // le terminal va servir : on peut l'aiguiller
   // On n'affiche PAS WS_PATH en entier : il contient le token.
   Serial.printf("[WS] cible : %s:%d%s?token=***\n", WS_HOST, WS_PORT, WS_ENDPOINT);
 
