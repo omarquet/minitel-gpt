@@ -169,6 +169,8 @@ static String usedSsid, usedPass;
 // Reseau absent du dernier scan : il peut etre a SSID cache, donc on l'essaie
 // quand meme - mais sans y consacrer les 12 s d'un reseau qu'on a vu.
 #define WIFI_TRY_ABSENT_MS 4000
+// Tours de liste avant de renoncer et d'ouvrir l'ecran de configuration.
+#define WIFI_PASSES 3
 
 #define MINITEL_RX 4    // ESP32-C3 RX  <- Minitel TX (broche DIN 3)
 #define MINITEL_TX 5    // ESP32-C3 TX  -> Minitel RX (broche DIN 1)
@@ -720,20 +722,33 @@ bool wifiSetupOnMinitel() {
 // repond. La LED continue de clignoter pendant l'attente : sans moniteur
 // serie, c'est le seul signe de vie.
 bool connectKnown() {
-  // Scanner d'abord, pour deux raisons : viser la bonne borne (voir
-  // demarrerConnexion), et ne pas perdre 12 s sur un reseau qui n'est meme pas
-  // la - de retour a la maison, deux des trois entrees de secrets.h sont hors
-  // de portee et coutaient 24 s a chaque demarrage. Un reseau absent du scan
-  // reste essaye, mais brievement : il peut etre a SSID cache.
-  if (millis() - scanDate > SCAN_FRAIS_MS || !scanDate) scanNets();
-  for (uint8_t i = 0; i < KNOWN_COUNT; i++) {
-    bool vu = indexScan(KNOWN_NETS[i].ssid) >= 0;
-    Serial.printf("[WiFi] essai %u/%u : %s%s\n", i + 1, KNOWN_COUNT,
-                  KNOWN_NETS[i].ssid, vu ? "" : " (absent du scan, essai bref)");
-    if (tryConnect(KNOWN_NETS[i].ssid, KNOWN_NETS[i].pass,
-                   vu ? WIFI_TRY_MS : WIFI_TRY_ABSENT_MS)) return true;
-    Serial.printf(" -> echec : %s (raison %u)\n",
-                  raisonWifi(derniereRaisonWifi), derniereRaisonWifi);
+  // Plusieurs passes sur la liste. Une association echoue par intermittence -
+  // raison 4 sur un reseau qui passe au demarrage suivant, sans que rien n'ait
+  // bouge - et un seul essai par reseau suffisait a basculer sur l'ecran de
+  // configuration, c'est-a-dire a demander un mot de passe WiFi au visiteur
+  // pour un raté passager. On repasse donc la liste, avec un releve neuf a
+  // chaque tour : le scan coupe la radio et la laisse se ranger, ce qui fait
+  // aussi office de pause entre deux tentatives.
+  for (uint8_t passe = 1; passe <= WIFI_PASSES && !setupRequested; passe++) {
+    if (passe > 1) {
+      Serial.printf("[WiFi] aucun reseau connu n'a repondu, passe %u/%u\n",
+                    passe, WIFI_PASSES);
+      scanDate = 0;                        // forcer un nouveau releve
+    }
+    // Scanner d'abord pour ne pas perdre 12 s sur un reseau qui n'est meme pas
+    // la - de retour a la maison, deux des trois entrees de secrets.h sont hors
+    // de portee et coutaient 24 s a chaque demarrage. Un reseau absent du scan
+    // reste essaye, mais brievement : il peut etre a SSID cache.
+    if (millis() - scanDate > SCAN_FRAIS_MS || !scanDate) scanNets();
+    for (uint8_t i = 0; i < KNOWN_COUNT; i++) {
+      bool vu = indexScan(KNOWN_NETS[i].ssid) >= 0;
+      Serial.printf("[WiFi] essai %u/%u : %s%s\n", i + 1, KNOWN_COUNT,
+                    KNOWN_NETS[i].ssid, vu ? "" : " (absent du scan, essai bref)");
+      if (tryConnect(KNOWN_NETS[i].ssid, KNOWN_NETS[i].pass,
+                     vu ? WIFI_TRY_MS : WIFI_TRY_ABSENT_MS)) return true;
+      Serial.printf(" -> echec : %s (raison %u)\n",
+                    raisonWifi(derniereRaisonWifi), derniereRaisonWifi);
+    }
   }
   return false;
 }
