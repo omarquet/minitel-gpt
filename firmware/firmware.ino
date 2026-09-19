@@ -407,6 +407,34 @@ void checkResetButton() {
 // dizaines de secondes, largement au-dela de FORCE_MODE_WINDOW_MS sinon).
 void idleTick() { updateStatusLed(); checkResetButton(); maybeForceModePeriInformatique(); delay(5); }
 
+// Pourquoi une connexion echoue. Sans cette raison, le journal disait "pas de
+// reponse" pour TOUT - mot de passe faux, reseau absent, box qui refuse - et il
+// ne restait qu'a deviner. La pile, elle, sait : elle la donne dans l'evenement
+// de deconnexion.
+static volatile uint8_t derniereRaisonWifi = 0;
+
+void onWifiEvent(WiFiEvent_t evt, WiFiEventInfo_t info) {
+  if (evt == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+    derniereRaisonWifi = info.wifi_sta_disconnected.reason;
+  }
+}
+
+const char* raisonWifi(uint8_t r) {
+  switch (r) {
+    case 0:   return "aucune reponse du point d'acces";
+    case WIFI_REASON_AUTH_EXPIRE:            return "authentification expiree";
+    case WIFI_REASON_ASSOC_EXPIRE:           return "association expiree";
+    case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT: return "MOT DE PASSE refuse (handshake)";
+    case WIFI_REASON_NO_AP_FOUND:            return "RESEAU INTROUVABLE : nom exact ? hors de portee ? 5 GHz (le C3 ne voit que le 2,4) ?";
+    case WIFI_REASON_AUTH_FAIL:              return "AUTHENTIFICATION refusee (mot de passe ?)";
+    case WIFI_REASON_ASSOC_FAIL:             return "association refusee par la box";
+    case WIFI_REASON_HANDSHAKE_TIMEOUT:      return "handshake expire";
+    case WIFI_REASON_CONNECTION_FAIL:        return "connexion refusee";
+    default:                                 return "voir WIFI_REASON_* dans esp_wifi_types.h";
+  }
+}
+
+
 // Arret FRANC avant toute nouvelle tentative. WiFi.disconnect() sans argument
 // ne coupe qu'une connexion ETABLIE : si la precedente tentative est encore en
 // cours - ce qui arrive des que WIFI_TRY_MS expire avant que la pile n'ait
@@ -416,6 +444,7 @@ void idleTick() { updateStatusLed(); checkResetButton(); maybeForceModePeriInfor
 // echouait seulement au bout de son delai. Couper la radio annule la tentative
 // en cours ; c'est deja ce que fait scanNets() avant de scanner.
 void demarrerConnexion(const char* ssid, const char* pass) {
+  derniereRaisonWifi = 0;           // la raison qui suivra sera celle de CET essai
   WiFi.disconnect(true);            // true = radio coupee
   delay(100);                       // laisser la pile se ranger
   WiFi.mode(WIFI_STA);              // la radio revient en station
@@ -632,7 +661,8 @@ bool connectKnown() {
   for (uint8_t i = 0; i < KNOWN_COUNT; i++) {
     Serial.printf("[WiFi] essai %u/%u : %s\n", i + 1, KNOWN_COUNT, KNOWN_NETS[i].ssid);
     if (tryConnect(KNOWN_NETS[i].ssid, KNOWN_NETS[i].pass, WIFI_TRY_MS)) return true;
-    Serial.println(" -> pas de reponse");
+    Serial.printf(" -> echec : %s (raison %u)\n",
+                  raisonWifi(derniereRaisonWifi), derniereRaisonWifi);
   }
   return false;
 }
@@ -662,13 +692,28 @@ void setup() {
     case ESP_RST_WDT:      cause = "WATCHDOG";                             break;
     case ESP_RST_BROWNOUT: cause = "BROWNOUT (alimentation insuffisante)"; break;
     case ESP_RST_DEEPSLEEP:cause = "sortie de veille profonde";            break;
-    default:               cause = "inconnue";                             break;
+    // Causes apparues avec les puces recentes. Sans elles, un reset par l'USB
+    // (ce que fait esptool apres un televersement) ou, bien plus grave, une
+    // CHUTE DE TENSION passagere se presentaient tous deux comme "inconnue" -
+    // le diagnostic le plus utile confondu avec le plus banal.
+    // PAS de #ifdef ici : ce sont des valeurs d'ENUMERATION, pas des macros.
+    // #ifdef ne les voit pas, et les quatre cas etaient silencieusement
+    // ignores par le preprocesseur - la cause restait "inconnue" alors meme
+    // que le code semblait la traiter.
+    case ESP_RST_USB:        cause = "peripherique USB (televersement)";    break;
+    case ESP_RST_JTAG:       cause = "JTAG";                                break;
+    case ESP_RST_PWR_GLITCH: cause = "CHUTE DE TENSION (alimentation !)";   break;
+    case ESP_RST_CPU_LOCKUP: cause = "processeur bloque";                   break;
+    default:               cause = "";                                    break;
   }
-  Serial.printf("[BOOT] cause du dernier demarrage : %s\n", cause);
+  if (*cause) Serial.printf("[BOOT] cause du dernier demarrage : %s\n", cause);
+  else        Serial.printf("[BOOT] cause du dernier demarrage : inconnue (code %d)\n",
+                            (int) esp_reset_reason());
 
   pinMode(STATUS_LED, OUTPUT);
   digitalWrite(STATUS_LED, LED_OFF);
   pinMode(BOOT_BTN, INPUT_PULLUP);            // lu seulement apres le boot
+  WiFi.onEvent(onWifiEvent);                  // pour connaitre la raison des echecs
 
 #if DEBUG_UART
   // Test du sens ESP32 -> Minitel, independant du WiFi et du serveur : on
