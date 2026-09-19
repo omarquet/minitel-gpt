@@ -354,16 +354,9 @@ static int8_t netRssi[MAX_NETS];
 // et c'est une cause classique d'association qui n'aboutit pas : la carte vise
 // le nom, pas la borne, et peut s'adresser a la plus lointaine.
 static uint8_t netBornes[MAX_NETS];
-// Identifiant materiel et canal de la MEILLEURE borne de ce reseau. C'est ce
-// qui permet de viser une borne precise au lieu d'un nom (voir indexScan).
-static uint8_t netBssid[MAX_NETS][6];
-static int32_t netCanal[MAX_NETS];
-// Date du dernier scan : le ciblage n'a de sens qu'avec un releve recent.
+// Date du dernier scan : savoir si un reseau est la n'a de sens qu'avec un
+// releve recent.
 static unsigned long scanDate = 0;
-
-// Faut-il viser une borne precise (voir demarrerConnexion) ? Vrai par defaut,
-// mis a faux le temps d'un second essai quand la borne visee reste muette.
-static bool viserBorne = true;
 #define SCAN_FRAIS_MS 60000
 static uint8_t netCount = 0;
 
@@ -493,22 +486,12 @@ void demarrerConnexion(const char* ssid, const char* pass) {
   delay(100);                       // laisser la pile se ranger
   WiFi.mode(WIFI_STA);              // la radio revient en station
   derniereRaisonWifi = 0;           // APRES l'arret : notre propre depart ne compte pas
-  // Viser la BORNE, pas seulement le nom. Une carte WiFi qui ne connait que le
-  // nom choisit elle-meme sa borne, et sur un reseau MAILLE - plusieurs bornes
-  // sous un meme nom - elle s'adresse parfois a la plus lointaine pendant
-  // qu'elle en entend une proche : l'association expire sans explication
-  // (raison 4, constate sur ce montage). Le scan nous a donne la plus forte :
-  // on la designe par son identifiant materiel et son canal.
-  int k = viserBorne ? indexScan(ssid) : -1;
-  if (k >= 0) {
-    Serial.printf("        borne visee %02X:%02X:%02X:%02X:%02X:%02X canal %d "
-                  "(%d dBm%s)\n",
-                  netBssid[k][0], netBssid[k][1], netBssid[k][2], netBssid[k][3],
-                  netBssid[k][4], netBssid[k][5], (int) netCanal[k], netRssi[k],
-                  netBornes[k] > 1 ? ", reseau maille" : "");
-    WiFi.begin(ssid, pass, netCanal[k], netBssid[k]);
-    return;
-  }
+  // Le NOM, rien que le nom : c'est la carte qui choisit sa borne. Une version
+  // precedente visait la meilleure borne du scan par son identifiant materiel
+  // et son canal, pour eviter qu'elle ne s'adresse a la plus lointaine d'un
+  // reseau maille. Mauvaise idee : viser une borne, c'est s'interdire toutes
+  // les autres, et la pile repondait "reseau introuvable" au lieu d'essayer la
+  // suivante. C'est le travail du pilote, pas le notre.
   WiFi.begin(ssid, pass);
 }
 
@@ -524,26 +507,6 @@ bool tryConnect(const char* ssid, const char* pass, unsigned long timeoutMs) {
   return true;
 }
 
-// Un essai en visant la meilleure borne, puis, s'il echoue, un second sur le
-// NOM SEUL. Viser une borne, c'est s'interdire les autres : le pilote cherche
-// cette adresse sur ce canal et conclut "reseau introuvable" (raison 201) sans
-// jamais s'adresser a la seconde borne d'un reseau maille, qui aurait peut-etre
-// repondu. Constate a la maison : deux demarrages de suite, meme piece, l'un
-// passe et l'autre non, selon la borne que le scan avait classee premiere.
-bool tryConnectAvecRepli(const char* ssid, const char* pass, unsigned long timeoutMs) {
-  if (tryConnect(ssid, pass, timeoutMs)) return true;
-  Serial.printf(" -> echec : %s (raison %u)\n",
-                raisonWifi(derniereRaisonWifi), derniereRaisonWifi);
-  if (indexScan(ssid) < 0) return false;      // on ne visait rien : rien a reprendre
-  Serial.println("        borne visee muette -> nouvel essai sur le nom seul");
-  viserBorne = false;
-  bool ok = tryConnect(ssid, pass, WIFI_TRY_MS);
-  viserBorne = true;
-  if (!ok) Serial.printf(" -> echec : %s (raison %u)\n",
-                         raisonWifi(derniereRaisonWifi), derniereRaisonWifi);
-  return ok;
-}
-
 bool connectSaved() {
   prefs.begin(NVS_NS, true);
   String ssid = prefs.getString("ssid", "");
@@ -551,7 +514,7 @@ bool connectSaved() {
   prefs.end();
   if (!ssid.length()) return false;
   Serial.printf("[WiFi] reseau memorise : %s\n", ssid.c_str());
-  return tryConnectAvecRepli(ssid.c_str(), pass.c_str(), WIFI_TRY_MS);
+  return tryConnect(ssid.c_str(), pass.c_str(), WIFI_TRY_MS);
 }
 
 const char* stars(int8_t rssi) {
@@ -588,11 +551,7 @@ void scanNets() {
     bool dup = false;
     for (uint8_t j = 0; j < netCount; j++) {
       if (netSsid[j] == ssid) {                          // meme reseau, autre borne
-        if (rssi > netRssi[j]) {                         // on garde la plus forte
-          netRssi[j] = rssi;
-          memcpy(netBssid[j], WiFi.BSSID(i), 6);
-          netCanal[j] = WiFi.channel(i);
-        }
+        if (rssi > netRssi[j]) netRssi[j] = rssi;         // on garde la plus forte
         netBornes[j]++;
         dup = true;
         break;
@@ -605,11 +564,9 @@ void scanNets() {
         if (netRssi[j] < netRssi[faible]) faible = j;
       if (rssi <= netRssi[faible]) continue;
       netSsid[faible] = ssid; netRssi[faible] = rssi; netBornes[faible] = 1;
-      memcpy(netBssid[faible], WiFi.BSSID(i), 6); netCanal[faible] = WiFi.channel(i);
       continue;
     }
     netSsid[netCount] = ssid; netRssi[netCount] = rssi; netBornes[netCount] = 1;
-    memcpy(netBssid[netCount], WiFi.BSSID(i), 6); netCanal[netCount] = WiFi.channel(i);
     netCount++;
   }
   WiFi.scanDelete();
@@ -619,15 +576,12 @@ void scanNets() {
   // de bornes d'un autre.
   for (uint8_t i = 1; i < netCount; i++) {
     String ssid = netSsid[i]; int8_t rssi = netRssi[i]; uint8_t bornes = netBornes[i];
-    uint8_t bssid[6]; memcpy(bssid, netBssid[i], 6); int32_t canal = netCanal[i];
     int8_t j = i - 1;
     while (j >= 0 && netRssi[j] < rssi) {
       netSsid[j + 1] = netSsid[j]; netRssi[j + 1] = netRssi[j];
-      netBornes[j + 1] = netBornes[j];
-      memcpy(netBssid[j + 1], netBssid[j], 6); netCanal[j + 1] = netCanal[j]; j--;
+      netBornes[j + 1] = netBornes[j]; j--;
     }
     netSsid[j + 1] = ssid; netRssi[j + 1] = rssi; netBornes[j + 1] = bornes;
-    memcpy(netBssid[j + 1], bssid, 6); netCanal[j + 1] = canal;
   }
   // La LISTE, pas seulement le compte. Sans elle, "3 reseaux distincts" ne dit
   // pas si celui qu'on cherche est la : impossible de distinguer un reseau hors
@@ -742,7 +696,7 @@ bool wifiSetupOnMinitel() {
     mnLine(); mnLine("   MINITEL GPT - RESEAU WIFI"); mnLine();
     snprintf(buf, sizeof buf, "Connexion a %.24s...", netSsid[idx].c_str());
     mnLine(buf);
-    if (tryConnectAvecRepli(netSsid[idx].c_str(), pass.c_str(), 20000)) {
+    if (tryConnect(netSsid[idx].c_str(), pass.c_str(), 20000)) {
       prefs.begin(NVS_NS, false);
       prefs.putString("ssid", netSsid[idx]);
       prefs.putString("pass", pass);
@@ -776,8 +730,10 @@ bool connectKnown() {
     bool vu = indexScan(KNOWN_NETS[i].ssid) >= 0;
     Serial.printf("[WiFi] essai %u/%u : %s%s\n", i + 1, KNOWN_COUNT,
                   KNOWN_NETS[i].ssid, vu ? "" : " (absent du scan, essai bref)");
-    if (tryConnectAvecRepli(KNOWN_NETS[i].ssid, KNOWN_NETS[i].pass,
-                            vu ? WIFI_TRY_MS : WIFI_TRY_ABSENT_MS)) return true;
+    if (tryConnect(KNOWN_NETS[i].ssid, KNOWN_NETS[i].pass,
+                   vu ? WIFI_TRY_MS : WIFI_TRY_ABSENT_MS)) return true;
+    Serial.printf(" -> echec : %s (raison %u)\n",
+                  raisonWifi(derniereRaisonWifi), derniereRaisonWifi);
   }
   return false;
 }
