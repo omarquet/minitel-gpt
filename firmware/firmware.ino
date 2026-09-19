@@ -360,6 +360,10 @@ static uint8_t netBssid[MAX_NETS][6];
 static int32_t netCanal[MAX_NETS];
 // Date du dernier scan : le ciblage n'a de sens qu'avec un releve recent.
 static unsigned long scanDate = 0;
+
+// Faut-il viser une borne precise (voir demarrerConnexion) ? Vrai par defaut,
+// mis a faux le temps d'un second essai quand la borne visee reste muette.
+static bool viserBorne = true;
 #define SCAN_FRAIS_MS 60000
 static uint8_t netCount = 0;
 
@@ -495,7 +499,7 @@ void demarrerConnexion(const char* ssid, const char* pass) {
   // qu'elle en entend une proche : l'association expire sans explication
   // (raison 4, constate sur ce montage). Le scan nous a donne la plus forte :
   // on la designe par son identifiant materiel et son canal.
-  int k = indexScan(ssid);
+  int k = viserBorne ? indexScan(ssid) : -1;
   if (k >= 0) {
     Serial.printf("        borne visee %02X:%02X:%02X:%02X:%02X:%02X canal %d "
                   "(%d dBm%s)\n",
@@ -520,6 +524,26 @@ bool tryConnect(const char* ssid, const char* pass, unsigned long timeoutMs) {
   return true;
 }
 
+// Un essai en visant la meilleure borne, puis, s'il echoue, un second sur le
+// NOM SEUL. Viser une borne, c'est s'interdire les autres : le pilote cherche
+// cette adresse sur ce canal et conclut "reseau introuvable" (raison 201) sans
+// jamais s'adresser a la seconde borne d'un reseau maille, qui aurait peut-etre
+// repondu. Constate a la maison : deux demarrages de suite, meme piece, l'un
+// passe et l'autre non, selon la borne que le scan avait classee premiere.
+bool tryConnectAvecRepli(const char* ssid, const char* pass, unsigned long timeoutMs) {
+  if (tryConnect(ssid, pass, timeoutMs)) return true;
+  Serial.printf(" -> echec : %s (raison %u)\n",
+                raisonWifi(derniereRaisonWifi), derniereRaisonWifi);
+  if (indexScan(ssid) < 0) return false;      // on ne visait rien : rien a reprendre
+  Serial.println("        borne visee muette -> nouvel essai sur le nom seul");
+  viserBorne = false;
+  bool ok = tryConnect(ssid, pass, WIFI_TRY_MS);
+  viserBorne = true;
+  if (!ok) Serial.printf(" -> echec : %s (raison %u)\n",
+                         raisonWifi(derniereRaisonWifi), derniereRaisonWifi);
+  return ok;
+}
+
 bool connectSaved() {
   prefs.begin(NVS_NS, true);
   String ssid = prefs.getString("ssid", "");
@@ -527,7 +551,7 @@ bool connectSaved() {
   prefs.end();
   if (!ssid.length()) return false;
   Serial.printf("[WiFi] reseau memorise : %s\n", ssid.c_str());
-  return tryConnect(ssid.c_str(), pass.c_str(), WIFI_TRY_MS);
+  return tryConnectAvecRepli(ssid.c_str(), pass.c_str(), WIFI_TRY_MS);
 }
 
 const char* stars(int8_t rssi) {
@@ -718,7 +742,7 @@ bool wifiSetupOnMinitel() {
     mnLine(); mnLine("   MINITEL GPT - RESEAU WIFI"); mnLine();
     snprintf(buf, sizeof buf, "Connexion a %.24s...", netSsid[idx].c_str());
     mnLine(buf);
-    if (tryConnect(netSsid[idx].c_str(), pass.c_str(), 20000)) {
+    if (tryConnectAvecRepli(netSsid[idx].c_str(), pass.c_str(), 20000)) {
       prefs.begin(NVS_NS, false);
       prefs.putString("ssid", netSsid[idx]);
       prefs.putString("pass", pass);
@@ -752,10 +776,8 @@ bool connectKnown() {
     bool vu = indexScan(KNOWN_NETS[i].ssid) >= 0;
     Serial.printf("[WiFi] essai %u/%u : %s%s\n", i + 1, KNOWN_COUNT,
                   KNOWN_NETS[i].ssid, vu ? "" : " (absent du scan, essai bref)");
-    if (tryConnect(KNOWN_NETS[i].ssid, KNOWN_NETS[i].pass,
-                   vu ? WIFI_TRY_MS : WIFI_TRY_ABSENT_MS)) return true;
-    Serial.printf(" -> echec : %s (raison %u)\n",
-                  raisonWifi(derniereRaisonWifi), derniereRaisonWifi);
+    if (tryConnectAvecRepli(KNOWN_NETS[i].ssid, KNOWN_NETS[i].pass,
+                            vu ? WIFI_TRY_MS : WIFI_TRY_ABSENT_MS)) return true;
   }
   return false;
 }
