@@ -771,8 +771,13 @@ void setup() {
   unsigned long t0 = millis();
   while (!Serial && millis() - t0 < 2000) delay(10);
   Minitel.begin(1200, SERIAL_7E1, MINITEL_RX, MINITEL_TX);
-  // Pas d'aiguillage ici : tant qu'il n'y a pas de WiFi, on n'a rien a afficher.
-  // Il est ouvert plus bas, aux deux seuls moments ou le Minitel sert vraiment.
+  // Aiguillage des le demarrage. Une version precedente attendait d'avoir
+  // quelque chose a afficher, pour ne pas deranger un Minitel deja en service.
+  // Moins fiable a l'usage : le moment ou le terminal est le plus susceptible
+  // d'ecouter est justement la mise sous tension, quand les deux appareils
+  // demarrent ensemble. La fenetre est rouverte plus bas a chaque fois qu'on
+  // s'apprete a ecrire - c'est sans effet s'il a deja bascule.
+  ouvrirFenetreAiguillage();
 
   // Cause du dernier demarrage : distingue un redemarrage volontaire du filet
   // WiFi (SW) d'un plantage (PANIC), d'un watchdog, ou d'une alimentation qui
