@@ -168,6 +168,20 @@ Minitel --DIN5 1200 7E1--> ESP32 (UART) --WiFi wss://--> reverse proxy --> conte
   intervenant de plus. Un champ **au-delà de 40 colonnes** n'a pas pu être
   replié par le modèle (il replie vers 40) : la coupure qui le suit est donc
   voulue.
+- **Le titre collé à la phrase qui suit** (`separe_titre_colle()`,
+  `minitel_gpt.py`, appelé au début de `apply_minitel_markup`). Le modèle ouvre
+  une couleur, écrit un titre en capitales, la referme — et enchaîne sur la
+  même ligne, sans espace ni retour à la ligne : `{cyan}BIENVENUE SUR LE
+  MINITEL{/}Salut ! Je suis ton assistant...` s'affichait
+  « BIENVENUE SUR LE MINITELSalut ! Je suis » (vu sur le vrai Minitel), alors
+  que la consigne demande un titre « seul sur sa ligne ». Une ligne vide est
+  donc insérée après coup. Deux garde-fous, parce qu'une couleur sert aussi à
+  souligner un mot au fil d'une phrase : la balise doit **ouvrir la ligne**, et
+  son contenu être **en capitales ET faire au moins deux mots** — « il faut
+  `{rouge}ABSOLUMENT{/}` éviter » (au fil du texte) et
+  « `{rouge}ATTENTION{/}` : ... » (un seul mot) ne sont pas touchés. Un titre
+  en minuscules collé reste donc non détecté : c'est assumé, le distinguer
+  d'une emphase en début de ligne demanderait de deviner.
 - **Volume : données contre fichiers de référence** (piège corrigé, il a coûté
   deux allers-retours). `entrypoint.sh` amorçait tout le volume en `cp -rn`
   (no-clobber), y compris `prompts.default.json` et `prompts/*.txt`, qui sont

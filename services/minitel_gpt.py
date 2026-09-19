@@ -559,10 +559,45 @@ MARKUP_INSTRUCTIONS = (
 )
 
 
+# Titre colle a la phrase suivante. Le modele ouvre une couleur, ecrit un
+# titre en capitales, la referme - et enchaine sur la meme ligne, sans espace
+# ni retour a la ligne : "{cyan}BIENVENUE SUR LE MINITEL{/}Salut ! Je suis ton
+# assistant virtuel..." donnait a l'ecran "BIENVENUE SUR LE MINITELSalut ! Je
+# suis" (vu sur le vrai Minitel). La consigne demande pourtant un titre "seul
+# sur sa ligne" ; comme pour le Markdown, on ne compte pas dessus.
+#
+# Deux garde-fous contre le faux positif, car une couleur sert aussi a
+# souligner un mot au fil d'une phrase : la balise doit ouvrir la LIGNE, et son
+# contenu doit etre en capitales ET faire au moins deux mots. "il faut
+# {rouge}ABSOLUMENT{/} eviter" (au fil du texte) et "{rouge}ATTENTION{/} : ..."
+# (un seul mot) ne sont donc pas touches.
+_TITRE_COLLE_RE = re.compile(
+    r"(?m)^([ \t]*\{[A-Za-z][A-Za-z /-]{0,22}\}[ \t]*)"
+    r"([^{}\n]{3,60}?)"
+    r"([ \t]*\{\s*/\s*\})[ \t]*(?=\S)")
+
+
+def _est_titre(s):
+    lettres = [c for c in s if c.isalpha()]
+    return (len(lettres) >= 6 and all(c.isupper() for c in lettres)
+            and len(s.split()) >= 2)
+
+
+def separe_titre_colle(text):
+    """Remet a la ligne apres un titre en couleur suivi de texte sur la meme
+    ligne. Le texte n'est pas touche, seule la mise en page l'est."""
+    def repl(m):
+        if not _est_titre(m.group(2)):
+            return m.group(0)
+        return m.group(1) + m.group(2) + m.group(3) + "\n\n"
+    return _TITRE_COLLE_RE.sub(repl, text)
+
+
 def apply_minitel_markup(text):
     """Traduit {rouge}...{/}, {grand}...{/} etc. en codes Videotex reels."""
     if not text:
         return text
+    text = separe_titre_colle(text)
     def repl(m):
         code = _markup_code(m.group(1))
         return code.decode("latin1") if code else ""
