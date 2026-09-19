@@ -53,7 +53,12 @@ _MARKDOWN_PATTERNS = [
 # qui traverse to_ascii et apply_minitel_markup sans etre touche, et que wrap()
 # reconnait pour recopier la ligne telle quelle.
 ART_MARK = "\x01"
-_ART_RE = re.compile(r"\{art\}[ \t]*\n?(.*?)\n?[ \t]*\{/art\}", re.S)
+# Les blancs ne sont manges QUE s'ils accompagnent un retour a la ligne. Avec
+# `[ \t]*\n?`, la premiere rangee d'une grille collee a la balise
+# ("{art} . | O | ." sur une seule ligne) perdait son espace de gauche et se
+# decalait d'un cran par rapport aux suivantes - une grille de morpion visible-
+# ment de travers a l'ecran, alors que le modele l'avait bien dessinee.
+_ART_RE = re.compile(r"\{art\}(?:[ \t]*\n)?(.*?)(?:\n[ \t]*)?\{/art\}", re.S)
 
 # Typographie francaise : une espace precede ? ! : et ;. wrap() decoupe sur les
 # espaces, il peut donc laisser la ponctuation seule en debut de ligne
@@ -91,6 +96,14 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 COLS = 40
 SCREEN_ROWS = 24
 CONTENT_ROWS = 18          # lignes de contenu par page de réponse
+# Rangées du pied de page ("-- SUITE --" et sa ligne vide), que la DERNIÈRE
+# page n'a pas : elle rend la main à l'invite de saisie. Une page unique peut
+# donc porter CONTENT_ROWS + 2 = 20 lignes, ce qui remplit l'écran au caractère
+# près : 20 lignes + la ligne vide + "Repondez ou SOMMAIRE" + son saut + "> "
+# font exactement 24 rangées. Compromis assumé : sur une telle page, taper une
+# question de plus de 38 caractères fait défiler la première ligne de la
+# réponse - déjà lue à ce stade.
+PIED_DE_PAGE = 2
 IDLE_TIMEOUT = 300         # 5 min → retour sommaire
 
 # ── Fournisseur d'IA (LLM) ───────────────────────────────────────────────
@@ -535,12 +548,22 @@ MARKUP_INSTRUCTIONS = (
     "hache en lignes de trois mots, illisible. Reserve-le donc a UN mot, "
     "trois au maximum, jamais plus d'une ligne, et referme-le "
     "immediatement. En cas de doute, utilise une couleur plutot que {grand}."
-    "\n\nDessins ASCII : UNIQUEMENT si on te demande explicitement un dessin, "
-    "un logo ou un schema, encadre-le par {art} et {/art}, chacun seul sur sa "
-    "ligne. Les lignes entre les deux sont affichees telles quelles, espaces "
-    "compris, sans reformatage : 39 colonnes de large et 15 lignes de haut au "
-    "maximum, caracteres ASCII simples uniquement, aucune autre mise en forme "
-    "a l'interieur. Pour toute autre question, n'utilise jamais {art}."
+    "\n\nTout ce dont l'ALIGNEMENT compte s'encadre par {art} et {/art}, "
+    "chacun seul sur sa ligne : un dessin, un logo, un schema, une grille, un "
+    "tableau en colonnes, un calendrier. Les lignes entre les deux sont "
+    "affichees telles quelles, espaces compris, sans reformatage : 39 colonnes "
+    "de large et 15 lignes de haut au maximum, caracteres ASCII simples "
+    "uniquement, aucune autre mise en forme a l'interieur. Hors de ces cas, "
+    "jamais de {art} : du texte courant encadre ainsi cesse d'etre decoupe par "
+    "le terminal et sort tronque a droite. Une grille dessinee SANS {art} sort "
+    "desalignee, ses espaces ecrases et ses lignes recollees - c'est le defaut "
+    "le plus visible a l'ecran."
+    "\n\nUn dessin coute des lignes, et l'ecran n'en a que 18 par page. Quand "
+    "ta reponse contient un {art}, reduis le texte autour a trois ou quatre "
+    "lignes et choisis la forme la plus compacte qui reste lisible, pour que "
+    "l'ensemble tienne sur UNE page : coupe en deux pages, un dessin ne se "
+    "lit plus d'un coup d'oeil, et la moitie qui compte est souvent celle "
+    "qu'on ne voit plus."
     "\n\nMise en page. Deux regles opposees, ne les confonds pas."
     "\n1. Ne coupe JAMAIS une phrase sur plusieurs lignes. Ecris chaque phrase "
     "d'un seul trait : c'est le terminal qui la decoupe en lignes de 40 "
@@ -1086,10 +1109,17 @@ def paginate_lines(lines, rows=CONTENT_ROWS, min_last=3, slack=5):
         compact.pop()
     lines = compact
 
-    def fin_de_paragraphe(depuis, jusqu_a):
-        """Index de la derniere ligne vide dans [jusqu_a, depuis], ou None."""
+    def coupure_propre(depuis, jusqu_a):
+        """Index de la derniere coupure acceptable dans [jusqu_a, depuis].
+
+        Deux endroits conviennent : une ligne vide (fin de paragraphe), et le
+        DEBUT d'un element de liste. Sans ce second cas, une enumeration a
+        tirets - que le modele ecrit sans ligne vide entre les items - n'offrait
+        aucune coupure : la page se terminait alors en plein milieu d'une phrase
+        ("...qui fait tourner ce" / "terminal !" en haut de la page suivante),
+        l'item coupe en deux."""
         for i in range(min(depuis, len(lines) - 1), max(jusqu_a, 0) - 1, -1):
-            if not lines[i].strip():
+            if not lines[i].strip() or _LIST_ITEM_RE.match(lines[i]):
                 return i
         return None
 
@@ -1102,6 +1132,17 @@ def paginate_lines(lines, rows=CONTENT_ROWS, min_last=3, slack=5):
             i += 1
         return len(lines) - i
 
+    # Un ecran de 24 rangees se repartit ainsi : `rows` lignes de contenu, une
+    # ligne vide, puis les deux lignes de pied ("-- SUITE ... --"). Or la
+    # DERNIERE page n'a pas de pied : elle rend la main a l'invite de saisie.
+    # Elle peut donc prendre ces deux rangees, et une reponse a peine plus
+    # longue qu'une page tient finalement en une seule. Sans ce calcul, une
+    # reponse de 20 lignes partait en 15 + 4 : deux pages, dont une a quatre
+    # lignes et quatorze rangees vides - et pour une grille de morpion, la
+    # grille se retrouvait sur la page precedente au moment de jouer.
+    if len(lines) <= rows + PIED_DE_PAGE:
+        return [lines]
+
     pages = []
     while lines:
         if not lines[0].strip():        # jamais de ligne vide en haut de page
@@ -1111,13 +1152,13 @@ def paginate_lines(lines, rows=CONTENT_ROWS, min_last=3, slack=5):
             pages.append(lines)
             break
         # `or` sans risque : lines[0] n'est jamais vide a ce stade, donc
-        # fin_de_paragraphe ne peut pas renvoyer l'index 0.
-        cut = fin_de_paragraphe(rows, rows - slack) or rows
+        # coupure_propre ne peut pas renvoyer l'index 0.
+        cut = coupure_propre(rows, rows - slack) or rows
         # A defaut de fin de paragraphe utilisable, on recule d'une ligne a la
         # fois : un paragraphe monolithique plus long qu'une page vaut mieux
         # equilibre (19 lignes -> 16 + 3) qu'en orphelin (18 + 1).
         while 0 < reste_utile(cut) < min_last and cut > rows // 2:
-            cut = fin_de_paragraphe(cut - 1, rows // 2) or (cut - 1)
+            cut = coupure_propre(cut - 1, rows // 2) or (cut - 1)
         pages.append(lines[:cut])
         lines = lines[cut:]
     return pages or [[""]]

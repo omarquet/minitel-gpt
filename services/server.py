@@ -391,7 +391,7 @@ def run_session(t):
                     t.w(bytes([CR, LF]))   # sinon le prochain "> " s'accole au precedent
                     continue
                 start_at_last = (action == 'retour')
-                if show_response(t, apply_minitel_markup(conf_aes.render(last)),
+                if show_response(t, apply_minitel_markup(conf_aes.render(last, preset_key)),
                                  start_at_last) in ('sommaire', 'timeout'):
                     break
                 t.clear()
@@ -418,7 +418,7 @@ def run_session(t):
 
             # render() a l'affichage seulement : l'historique garde les champs
             # {fiche} du modele, pas les lignes deja dessinees.
-            if show_response(t, apply_minitel_markup(conf_aes.render(answer))) in ('sommaire', 'timeout'):
+            if show_response(t, apply_minitel_markup(conf_aes.render(answer, preset_key))) in ('sommaire', 'timeout'):
                 break
 
             t.w(bytes([CR, LF])); t.w(FG_WHITE)

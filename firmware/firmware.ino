@@ -166,6 +166,11 @@ static String usedSsid, usedPass;
 // Delai laisse a chaque reseau avant de passer au suivant. Assez long pour un
 // DHCP lent, assez court pour faire le tour d'une liste de trois sans lasser.
 #define WIFI_TRY_MS 12000
+// Reseau absent du dernier scan : il peut etre a SSID cache, donc on l'essaie
+// quand meme - mais sans y consacrer les 12 s d'un reseau qu'on a vu.
+#define WIFI_TRY_ABSENT_MS 4000
+// Tours de liste avant de renoncer et d'ouvrir l'ecran de configuration.
+#define WIFI_PASSES 3
 
 #define MINITEL_RX 4    // ESP32-C3 RX  <- Minitel TX (broche DIN 3)
 #define MINITEL_TX 5    // ESP32-C3 TX  -> Minitel RX (broche DIN 1)
@@ -211,13 +216,26 @@ void forcerModePeriInformatique() {
 // Un seul envoi ferait reposer tout le mecanisme sur un delai devine : le
 // Minitel peut encore etre en train de demarrer lui-meme (sortie de veille,
 // reset interne) au moment ou l'ESP32 envoie sa toute premiere sequence,
-// qui serait alors perdue en silence. On la repete donc pendant quelques
-// secondes plutot que de parier sur un seul instant - inoffensif si le
-// Minitel a deja bascule, ca ne fait que reaffirmer le meme aiguillage.
-#define FORCE_MODE_WINDOW_MS 5000   // duree totale des tentatives apres le boot
+// qui serait alors perdue en silence. On la repete donc pendant une dizaine
+// de secondes plutot que de parier sur un seul instant - inoffensif si le
+// Minitel a deja bascule, ca ne fait que reaffirmer le meme aiguillage. La
+// fenetre est large parce que le Minitel peut sortir de veille bien apres
+// l'ESP32 : mieux vaut insister trop longtemps que rater le reveil.
+#define FORCE_MODE_WINDOW_MS 10000  // duree totale des tentatives apres le boot
 #define FORCE_MODE_PERIOD_MS 500    // intervalle entre deux tentatives
 static unsigned long forceModeUntilMs = 0;
 static unsigned long lastForceModeMs = 0;
+
+// A appeler quand on s'apprete a ECRIRE sur le Minitel, et seulement la :
+// avant l'ecran de configuration, et une fois le WiFi obtenu. Tant qu'on
+// cherche un reseau, le terminal ne doit pas etre touche - on n'a rien a lui
+// montrer, et le basculer pour rien lui fait perdre l'affichage qu'il avait.
+void ouvrirFenetreAiguillage() {
+  forceModeUntilMs = millis() + FORCE_MODE_WINDOW_MS;
+  forcerModePeriInformatique();          // premier envoi immediat
+  lastForceModeMs = millis();            // les suivants passent par idleTick()/loop()
+}
+
 
 void maybeForceModePeriInformatique() {
   if (millis() >= forceModeUntilMs) return;
@@ -336,6 +354,14 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
 #define SETUP_IDLE_MS 120000     // sans frappe : on repart tenter les reseaux connus
 static String netSsid[MAX_NETS];
 static int8_t netRssi[MAX_NETS];
+// Nombre de bornes diffusant ce meme nom. Un reseau maille en compte plusieurs,
+// et c'est une cause classique d'association qui n'aboutit pas : la carte vise
+// le nom, pas la borne, et peut s'adresser a la plus lointaine.
+static uint8_t netBornes[MAX_NETS];
+// Date du dernier scan : savoir si un reseau est la n'a de sens qu'avec un
+// releve recent.
+static unsigned long scanDate = 0;
+#define SCAN_FRAIS_MS 60000
 static uint8_t netCount = 0;
 
 void mnClear() { Minitel.write(0x0C); }                  // FF : efface l'ecran
@@ -407,9 +433,84 @@ void checkResetButton() {
 // dizaines de secondes, largement au-dela de FORCE_MODE_WINDOW_MS sinon).
 void idleTick() { updateStatusLed(); checkResetButton(); maybeForceModePeriInformatique(); delay(5); }
 
-bool tryConnect(const char* ssid, const char* pass, unsigned long timeoutMs) {
-  WiFi.disconnect();
+// Pourquoi une connexion echoue. Sans cette raison, le journal disait "pas de
+// reponse" pour TOUT - mot de passe faux, reseau absent, box qui refuse - et il
+// ne restait qu'a deviner. La pile, elle, sait : elle la donne dans l'evenement
+// de deconnexion.
+static volatile uint8_t derniereRaisonWifi = 0;
+
+void onWifiEvent(WiFiEvent_t evt, WiFiEventInfo_t info) {
+  if (evt != ARDUINO_EVENT_WIFI_STA_DISCONNECTED) return;
+  uint8_t r = info.wifi_sta_disconnected.reason;
+  // 36 (STA_LEAVING) et 8 (ASSOC_LEAVE), c'est NOUS qui partons : le
+  // WiFi.disconnect() pose avant chaque tentative emet cet evenement. Le
+  // retenir affichait notre propre depart comme si la box avait refuse -
+  // "raison 36" sur deux essais de suite, alors qu'aucun refus n'etait venu.
+  if (r == WIFI_REASON_STA_LEAVING || r == WIFI_REASON_ASSOC_LEAVE) return;
+  derniereRaisonWifi = r;
+}
+
+const char* raisonWifi(uint8_t r) {
+  switch (r) {
+    case 0:   return "AUCUN refus recu : le point d'acces n'a jamais repondu "
+                     "(emission de la carte ? antenne ?)";
+    case WIFI_REASON_AUTH_EXPIRE:            return "authentification expiree";
+    case WIFI_REASON_ASSOC_EXPIRE:           return "association expiree";
+    case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT: return "MOT DE PASSE refuse (handshake)";
+    case WIFI_REASON_NO_AP_FOUND:            return "RESEAU INTROUVABLE : nom exact ? hors de portee ? 5 GHz (le C3 ne voit que le 2,4) ?";
+    case WIFI_REASON_AUTH_FAIL:              return "AUTHENTIFICATION refusee (mot de passe ?)";
+    case WIFI_REASON_ASSOC_FAIL:             return "association refusee par la box";
+    case WIFI_REASON_HANDSHAKE_TIMEOUT:      return "handshake expire";
+    case WIFI_REASON_CONNECTION_FAIL:        return "connexion refusee";
+    default:                                 return "voir WIFI_REASON_* dans esp_wifi_types.h";
+  }
+}
+
+
+// Annuler la tentative precedente SANS couper la radio. Il faut bien l'annuler :
+// si elle est encore en cours - ce qui arrive des que WIFI_TRY_MS expire avant
+// que la pile n'ait termine - le pilote refuse la nouvelle configuration
+// ("E wifi:sta is connecting, cannot set config") et le WiFi.begin() qui suit
+// est IGNORE en silence ; le reseau suivant de la liste n'etait alors jamais
+// essaye. Mais esp_wifi_disconnect() suffit a cela : c'est ce que fait
+// WiFi.disconnect(false).
+//
+// La version precedente coupait la radio (disconnect(true)). Trop brutal :
+// scanNets() vient deja de l'eteindre pour scanner, et le PREMIER essai qui
+// suit - donc apres deux extinctions coup sur coup - echouait par
+// intermittence en "association expiree" (raison 4), y compris a -35 dBm,
+// pendant que le second essai passait. Ce qui manquait n'etait pas la
+// brutalite mais le temps de se ranger.
+//
+// A surveiller si ce message reapparait dans le log : la pause de 250 ms
+// ci-dessous serait alors trop courte pour annuler proprement.
+// Ce reseau figure-t-il dans le dernier scan, et est-il assez recent pour
+// qu'on s'y fie ? Retourne son index, ou -1.
+int indexScan(const char* ssid) {
+  if (!scanDate || millis() - scanDate > SCAN_FRAIS_MS) return -1;
+  for (uint8_t i = 0; i < netCount; i++)
+    if (netSsid[i] == ssid) return i;
+  return -1;
+}
+
+
+void demarrerConnexion(const char* ssid, const char* pass) {
+  WiFi.mode(WIFI_STA);              // deja le cas en general : sans effet
+  WiFi.disconnect(false);           // false = la radio RESTE allumee
+  delay(250);                       // laisser la pile se ranger avant de reconfigurer
+  derniereRaisonWifi = 0;           // APRES l'arret : notre propre depart ne compte pas
+  // Le NOM, rien que le nom : c'est la carte qui choisit sa borne. Une version
+  // precedente visait la meilleure borne du scan par son identifiant materiel
+  // et son canal, pour eviter qu'elle ne s'adresse a la plus lointaine d'un
+  // reseau maille. Mauvaise idee : viser une borne, c'est s'interdire toutes
+  // les autres, et la pile repondait "reseau introuvable" au lieu d'essayer la
+  // suivante. C'est le travail du pilote, pas le notre.
   WiFi.begin(ssid, pass);
+}
+
+
+bool tryConnect(const char* ssid, const char* pass, unsigned long timeoutMs) {
+  demarrerConnexion(ssid, pass);
   unsigned long t0 = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - t0 < timeoutMs && !setupRequested) {
     idleTick();
@@ -463,7 +564,8 @@ void scanNets() {
     bool dup = false;
     for (uint8_t j = 0; j < netCount; j++) {
       if (netSsid[j] == ssid) {                          // meme reseau, autre borne
-        if (rssi > netRssi[j]) netRssi[j] = rssi;
+        if (rssi > netRssi[j]) netRssi[j] = rssi;         // on garde la plus forte
+        netBornes[j]++;
         dup = true;
         break;
       }
@@ -474,21 +576,37 @@ void scanNets() {
       for (uint8_t j = 1; j < netCount; j++)             // s'il bat le plus faible
         if (netRssi[j] < netRssi[faible]) faible = j;
       if (rssi <= netRssi[faible]) continue;
-      netSsid[faible] = ssid; netRssi[faible] = rssi;
+      netSsid[faible] = ssid; netRssi[faible] = rssi; netBornes[faible] = 1;
       continue;
     }
-    netSsid[netCount] = ssid; netRssi[netCount] = rssi; netCount++;
+    netSsid[netCount] = ssid; netRssi[netCount] = rssi; netBornes[netCount] = 1;
+    netCount++;
   }
   WiFi.scanDelete();
-  for (uint8_t i = 1; i < netCount; i++) {               // tri par insertion
-    String ssid = netSsid[i]; int8_t rssi = netRssi[i];
+  scanDate = millis();
+  // Tri par insertion. Les trois tableaux decrivent le MEME reseau a un index
+  // donne : ils se deplacent ensemble, sinon un nom se retrouve avec le nombre
+  // de bornes d'un autre.
+  for (uint8_t i = 1; i < netCount; i++) {
+    String ssid = netSsid[i]; int8_t rssi = netRssi[i]; uint8_t bornes = netBornes[i];
     int8_t j = i - 1;
     while (j >= 0 && netRssi[j] < rssi) {
-      netSsid[j + 1] = netSsid[j]; netRssi[j + 1] = netRssi[j]; j--;
+      netSsid[j + 1] = netSsid[j]; netRssi[j + 1] = netRssi[j];
+      netBornes[j + 1] = netBornes[j]; j--;
     }
-    netSsid[j + 1] = ssid; netRssi[j + 1] = rssi;
+    netSsid[j + 1] = ssid; netRssi[j + 1] = rssi; netBornes[j + 1] = bornes;
   }
+  // La LISTE, pas seulement le compte. Sans elle, "3 reseaux distincts" ne dit
+  // pas si celui qu'on cherche est la : impossible de distinguer un reseau hors
+  // de portee d'un mot de passe refuse. Et quand la prise DIN n'est pas
+  // branchee, l'ecran de configuration est invisible - le journal est alors la
+  // seule fenetre sur ce que la carte voit reellement.
   Serial.printf("[WiFi] scan : %d entrees -> %u reseaux distincts\n", n, netCount);
+  for (uint8_t i = 0; i < netCount; i++) {
+    Serial.printf("        %-32s %4d dBm  %-4s %s\n", netSsid[i].c_str(), netRssi[i],
+                  stars(netRssi[i]),
+                  netBornes[i] > 1 ? "(plusieurs bornes : reseau maille)" : "");
+  }
 }
 
 void showList(uint8_t page, uint8_t pages) {
@@ -558,6 +676,7 @@ bool askPassword(const String& ssid, String& out) {
 // devant un menu que personne ne lit.
 bool wifiSetupOnMinitel() {
   setupRequested = false;
+  ouvrirFenetreAiguillage();      // on va ecrire sur le Minitel : il doit ecouter
   scanNets();
   // Meme sans un seul reseau detecte, on AFFICHE l'ecran : partir en silence,
   // c'etait laisser le visiteur devant un boitier qui clignote sans rien dire.
@@ -614,10 +733,33 @@ bool wifiSetupOnMinitel() {
 // repond. La LED continue de clignoter pendant l'attente : sans moniteur
 // serie, c'est le seul signe de vie.
 bool connectKnown() {
-  for (uint8_t i = 0; i < KNOWN_COUNT; i++) {
-    Serial.printf("[WiFi] essai %u/%u : %s\n", i + 1, KNOWN_COUNT, KNOWN_NETS[i].ssid);
-    if (tryConnect(KNOWN_NETS[i].ssid, KNOWN_NETS[i].pass, WIFI_TRY_MS)) return true;
-    Serial.println(" -> pas de reponse");
+  // Plusieurs passes sur la liste. Une association echoue par intermittence -
+  // raison 4 sur un reseau qui passe au demarrage suivant, sans que rien n'ait
+  // bouge - et un seul essai par reseau suffisait a basculer sur l'ecran de
+  // configuration, c'est-a-dire a demander un mot de passe WiFi au visiteur
+  // pour un raté passager. On repasse donc la liste, avec un releve neuf a
+  // chaque tour : le scan coupe la radio et la laisse se ranger, ce qui fait
+  // aussi office de pause entre deux tentatives.
+  for (uint8_t passe = 1; passe <= WIFI_PASSES && !setupRequested; passe++) {
+    if (passe > 1) {
+      Serial.printf("[WiFi] aucun reseau connu n'a repondu, passe %u/%u\n",
+                    passe, WIFI_PASSES);
+      scanDate = 0;                        // forcer un nouveau releve
+    }
+    // Scanner d'abord pour ne pas perdre 12 s sur un reseau qui n'est meme pas
+    // la - de retour a la maison, deux des trois entrees de secrets.h sont hors
+    // de portee et coutaient 24 s a chaque demarrage. Un reseau absent du scan
+    // reste essaye, mais brievement : il peut etre a SSID cache.
+    if (millis() - scanDate > SCAN_FRAIS_MS || !scanDate) scanNets();
+    for (uint8_t i = 0; i < KNOWN_COUNT; i++) {
+      bool vu = indexScan(KNOWN_NETS[i].ssid) >= 0;
+      Serial.printf("[WiFi] essai %u/%u : %s%s\n", i + 1, KNOWN_COUNT,
+                    KNOWN_NETS[i].ssid, vu ? "" : " (absent du scan, essai bref)");
+      if (tryConnect(KNOWN_NETS[i].ssid, KNOWN_NETS[i].pass,
+                     vu ? WIFI_TRY_MS : WIFI_TRY_ABSENT_MS)) return true;
+      Serial.printf(" -> echec : %s (raison %u)\n",
+                    raisonWifi(derniereRaisonWifi), derniereRaisonWifi);
+    }
   }
   return false;
 }
@@ -629,9 +771,13 @@ void setup() {
   unsigned long t0 = millis();
   while (!Serial && millis() - t0 < 2000) delay(10);
   Minitel.begin(1200, SERIAL_7E1, MINITEL_RX, MINITEL_TX);
-  forceModeUntilMs = millis() + FORCE_MODE_WINDOW_MS;
-  forcerModePeriInformatique();          // premier envoi immediat
-  lastForceModeMs = millis();            // les suivants passent par idleTick()/loop()
+  // Aiguillage des le demarrage. Une version precedente attendait d'avoir
+  // quelque chose a afficher, pour ne pas deranger un Minitel deja en service.
+  // Moins fiable a l'usage : le moment ou le terminal est le plus susceptible
+  // d'ecouter est justement la mise sous tension, quand les deux appareils
+  // demarrent ensemble. La fenetre est rouverte plus bas a chaque fois qu'on
+  // s'apprete a ecrire - c'est sans effet s'il a deja bascule.
+  ouvrirFenetreAiguillage();
 
   // Cause du dernier demarrage : distingue un redemarrage volontaire du filet
   // WiFi (SW) d'un plantage (PANIC), d'un watchdog, ou d'une alimentation qui
@@ -647,13 +793,35 @@ void setup() {
     case ESP_RST_WDT:      cause = "WATCHDOG";                             break;
     case ESP_RST_BROWNOUT: cause = "BROWNOUT (alimentation insuffisante)"; break;
     case ESP_RST_DEEPSLEEP:cause = "sortie de veille profonde";            break;
-    default:               cause = "inconnue";                             break;
+    // Causes apparues avec les puces recentes. Sans elles, un reset par l'USB
+    // (ce que fait esptool apres un televersement) ou, bien plus grave, une
+    // CHUTE DE TENSION passagere se presentaient tous deux comme "inconnue" -
+    // le diagnostic le plus utile confondu avec le plus banal.
+    // PAS de #ifdef ici : ce sont des valeurs d'ENUMERATION, pas des macros.
+    // #ifdef ne les voit pas, et les quatre cas etaient silencieusement
+    // ignores par le preprocesseur - la cause restait "inconnue" alors meme
+    // que le code semblait la traiter.
+    case ESP_RST_USB:        cause = "peripherique USB (televersement)";    break;
+    case ESP_RST_JTAG:       cause = "JTAG";                                break;
+    case ESP_RST_PWR_GLITCH: cause = "CHUTE DE TENSION (alimentation !)";   break;
+    case ESP_RST_CPU_LOCKUP: cause = "processeur bloque";                   break;
+    default:               cause = "";                                    break;
   }
-  Serial.printf("[BOOT] cause du dernier demarrage : %s\n", cause);
+  if (*cause) Serial.printf("[BOOT] cause du dernier demarrage : %s\n", cause);
+  else        Serial.printf("[BOOT] cause du dernier demarrage : inconnue (code %d)\n",
+                            (int) esp_reset_reason());
 
   pinMode(STATUS_LED, OUTPUT);
   digitalWrite(STATUS_LED, LED_OFF);
   pinMode(BOOT_BTN, INPUT_PULLUP);            // lu seulement apres le boot
+  WiFi.onEvent(onWifiEvent);                  // pour connaitre la raison des echecs
+  // L'adresse MAC de la carte. Sans elle, impossible de verifier si la box la
+  // bloque : un filtrage MAC ou un "controle d'acces" fait expirer
+  // l'authentification (raison 2) sans jamais rien refuser explicitement - le
+  // point d'acces se contente d'ignorer un inconnu. C'est aussi ce qu'il faut
+  // chercher dans la liste des appareils de la box.
+  WiFi.mode(WIFI_STA);
+  Serial.printf("[WiFi] adresse MAC de cette carte : %s\n", WiFi.macAddress().c_str());
 
 #if DEBUG_UART
   // Test du sens ESP32 -> Minitel, independant du WiFi et du serveur : on
@@ -680,6 +848,7 @@ void setup() {
   }
   Serial.printf("[WiFi] OK sur %s, IP %s\n", WiFi.SSID().c_str(),
                 WiFi.localIP().toString().c_str());
+  ouvrirFenetreAiguillage();      // le terminal va servir : on peut l'aiguiller
   // On n'affiche PAS WS_PATH en entier : il contient le token.
   Serial.printf("[WS] cible : %s:%d%s?token=***\n", WS_HOST, WS_PORT, WS_ENDPOINT);
 
@@ -737,8 +906,7 @@ void loop() {
       // explicitement avant d'envisager le redemarrage.
       wifiRetried = true;
       Serial.println("[WiFi] 30 s sans reseau -> relance de la connexion");
-      WiFi.disconnect();
-      WiFi.begin(usedSsid.c_str(), usedPass.c_str());
+      demarrerConnexion(usedSsid.c_str(), usedPass.c_str());
     } else if (millis() - wifiDownSince > 120000) {
       // Le redemarrage refait le tour complet de la liste, ce que la relance
       // ci-dessus ne fait pas : c'est ainsi qu'on bascule sur le reseau de

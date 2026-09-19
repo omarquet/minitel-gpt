@@ -17,6 +17,7 @@ import time
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from collections import Counter
 from datetime import datetime
 from html import unescape
 from pathlib import Path
@@ -25,8 +26,8 @@ import requests
 
 # Sens de la dependance : conf_aes -> minitel_gpt, jamais l'inverse. Supprimer
 # ce fichier apres la conference ne laisse donc rien de casse derriere lui.
-# On y prend COLS et ART_MARK plutot que de les recopier : deux constantes
-# dupliquees, ce sont deux constantes qui divergent.
+# On y prend COLS, ART_MARK et les noms de jours/mois plutot que de les
+# recopier : deux constantes dupliquees, ce sont deux constantes qui divergent.
 import minitel_gpt as mg
 
 log = logging.getLogger("minitel-gpt")
@@ -39,6 +40,9 @@ KEYWORDS = ("agile en seine", "agileenseine", "aes")
 # La personnalite dediee, pour qui le programme est injecte a CHAQUE question :
 # "c'est quoi les prochaines confs ?" ne contient aucun mot-clef.
 PRESET_KEY = "agile_en_seine"
+# Le fichier de prompt de cette personnalite. Il sert de second signe de
+# reconnaissance : voir is_aes_preset().
+PROMPT_FILE = "agile_en_seine.txt"
 # Format du cache des descriptions. A incrementer quand ce qu'on stocke change :
 # les fiches deja relevees sont sinon conservees telles quelles, leur date de
 # modification n'ayant pas bouge. La v1 gardait des extraits de 320 caracteres.
@@ -48,7 +52,12 @@ CACHE_VERSION = 3
 # horaires sur 100) et la troncature tombait en plein titre de session : le
 # modele repondait alors a cote sur les conferences de fin de journee, sans
 # rien signaler.
-MAX_CHARS = 90000
+# Plafond du contenu injecte. Il ne protege plus du cout (les descriptions
+# integrales le fixent deja) mais d'un emballement : une page qui repartirait
+# en boucle, un site qui change de structure. A 57 sessions et 1269 caracteres
+# de description en moyenne, le bloc pese 86 ko - l'ancien plafond de 90 000
+# etait atteint a 96 %, soit trois sessions avant la troncature silencieuse.
+MAX_CHARS = 250000
 TIMEOUT = 8
 
 # --- Descriptions de session ---------------------------------------------
@@ -90,10 +99,35 @@ _refresh_lock = threading.Lock()
 _prog_lock = threading.Lock()
 _prog_cache = {"releve_le": 0.0, "texte": ""}
 
+# Ligne de session : le creneau, precede du prefixe "[Jour ...]" pose par
+# _sessions(). Les lignes de description sont indentees, elles ne matchent pas.
+_LIGNE_SESSION = re.compile(r"^(?:\[[^\]]*\]\s*)?(\d{2}:\d{2})")
 _SLOT = re.compile(r"\d{2}:\d{2} - \d{2}:\d{2}")
 # Chaque grille embarque ce message d'etat vide, cache en display:none. Recopie
 # tel quel, il faisait dire au modele qu'une journee pourtant pleine etait vide.
 _EMPTY_NOTICE = re.compile(r"Aucun programme n'est pr[ée]vu[^.]*", re.I)
+
+
+def is_aes_preset(key):
+    """La personnalite active est-elle celle d'Agile en Seine ?
+
+    On ne se fie pas au seul identifiant. L'admin permet de renommer une
+    personnalite ou d'en creer une copie : son identifiant cesse alors de valoir
+    PRESET_KEY, le programme n'est plus injecte, et RIEN NE LE DIT - le modele
+    repond de memoire et invente des sessions parfaitement plausibles (vu :
+    "09:40 De l'Agilite a l'Impact, Amphi Arc-en-Ciel", une session et une salle
+    qui n'existent pas). Une erreur muette est pire qu'une panne. On reconnait
+    donc aussi la personnalite a son fichier de prompt, qui, lui, ne change pas
+    quand on renomme."""
+    if key == PRESET_KEY:
+        return True
+    try:
+        with open(mg.PROMPTS_FILE, encoding="utf-8") as f:
+            preset = json.load(f).get("presets", {}).get(key) or {}
+    except Exception as e:
+        log.warning("lecture de prompts.json pour %r : %s", key, e)
+        return False
+    return preset.get("prompt_file") == PROMPT_FILE
 
 
 def is_question(text):
@@ -244,6 +278,28 @@ def descriptions():
             if isinstance(v, dict)}      # ecarte _releve_le et _version
 
 
+def _recap(sessions):
+    """Ligne de comptes par creneau, en tete de chaque journee.
+
+    Un modele compte mal : sur 57 sessions reparties en 86 ko, il a annonce
+    "6 sessions a 10:30" la ou il y en avait 7 - une erreur invisible pour qui
+    ne verifie pas, et pourtant grave (on se presente devant une salle qui
+    n'existe pas, ou on en rate une). Le comptage est arithmetique : c'est au
+    code de le faire et au modele de le lire."""
+    if not sessions:
+        return ""
+    # Une ligne de session, et rien d'autre : le creneau en tete, derriere le
+    # prefixe "[Jour ...]". Compter un horaire trouve n'importe ou aurait pris
+    # "de 14:00 - 15:00" cite dans un resume pour une session de plus, et
+    # ancrer en colonne 0 aurait rendu zero depuis que le jour prefixe chaque
+    # ligne - une erreur muette dans les deux cas.
+    creneaux = Counter(m.group(1) for m in
+                       (_LIGNE_SESSION.match(l) for l in sessions.split("\n")) if m)
+    detail = ", ".join(f"{h} ({n})" for h, n in sorted(creneaux.items()))
+    return (f"Sessions par creneau (comptes exacts, ne pas recompter) : "
+            f"{detail} - {sum(creneaux.values())} au total dans la journee.\n")
+
+
 def fetch():
     """Programme de la page officielle, JOUR PAR JOUR.
 
@@ -264,9 +320,22 @@ def fetch():
         for i, grille in enumerate(grilles):
             titre = jours[i] if i < len(jours) else f"Jour {i + 1}"
             sessions = _sessions(grille, descs, titre)
-            blocs.append(f"== {titre} ==\n"
+            blocs.append(f"== {titre} ==\n" + _recap(sessions)
                          + (sessions or "Aucune session publiee pour l'instant."))
-        return "\n".join(blocs)[:MAX_CHARS]
+        texte = "\n".join(blocs)
+        if len(texte) <= MAX_CHARS:
+            return texte
+        # Couper a [:MAX_CHARS] tombait en plein milieu d'une ligne, et surtout
+        # en SILENCE : les dernieres sessions de la deuxieme journee
+        # disparaissaient, et le modele annoncait en toute confiance qu'il n'y
+        # avait plus rien apres 15 h. On coupe donc sur une fin de ligne, on le
+        # dit dans le texte injecte, et on le crie dans les logs.
+        coupe = texte[:MAX_CHARS].rsplit("\n", 1)[0]
+        log.warning("programme AES tronque : %d caracteres pour un plafond de %d "
+                    "- augmenter MAX_CHARS", len(texte), MAX_CHARS)
+        return coupe + ("\n(Programme tronque : la fin de la liste manque. "
+                        "Dis-le si on te demande les dernieres sessions, "
+                        "n'affirme pas qu'il n'y en a plus.)")
     except Exception as e:
         log.warning("fetch agile en seine: %s", e)
         return ""
@@ -274,8 +343,17 @@ def fetch():
 
 def _refresh_programme():
     texte = fetch()
-    if texte:                          # un echec ne remplace pas ce qu'on a
-        _prog_cache.update(releve_le=time.time(), texte=texte)
+    if not texte:                      # un echec ne remplace pas ce qu'on a
+        return
+    # Ni un releve vide. Si la page change de structure - ce qui est deja
+    # arrive - _sessions() ne reconnait plus aucune carte et rend un programme
+    # sans une seule session : le modele annoncerait alors une conference vide,
+    # avec aplomb. Mieux vaut servir le dernier programme valable et le signaler.
+    if not _SLOT.search(texte) and _SLOT.search(_prog_cache["texte"] or ""):
+        log.error("releve AES sans aucune session alors que le precedent en avait : "
+                  "structure de la page changee ? on garde le programme precedent")
+        return
+    _prog_cache.update(releve_le=time.time(), texte=texte)
 
 
 def programme():
@@ -429,7 +507,12 @@ def _rendre_liste(m):
 # | L'IA va obliger...", vu a l'ecran). Une ligne a deux barres est une session
 # quoi qu'il arrive : on la rend comme si elle etait dans un {liste}. La barre
 # verticale n'appartient pas au francais courant, le faux positif est theorique.
-_LIGNE_PIPE_RE = re.compile(r"^[ \t]*[-*]?[ \t]*([^|\n]+\|[^|\n]+\|[^\n]+)$", re.M)
+# Le premier champ doit porter un HORAIRE. Sans cette exigence, n'importe quelle
+# ligne a deux barres passait pour une session : une grille de morpion
+# (" 1 | 2 | 3") etait redessinee en fausse fiche. Le gabarit, lui, commence
+# toujours par "Mar. 22 - 15:00-15:45".
+_LIGNE_PIPE_RE = re.compile(
+    r"^[ \t]*[-*]?[ \t]*([^|\n]*\d{1,2}:\d{2}[^|\n]*\|[^|\n]+\|[^\n]+)$", re.M)
 
 
 def _rendre_ligne_orpheline(m):
@@ -437,12 +520,18 @@ def _rendre_ligne_orpheline(m):
     return "\n".join(mg.ART_MARK + ln for ln in lignes) if lignes else m.group(0)
 
 
-def render(texte):
+def render(texte, key=None):
     """Remplace les blocs {fiche} et {liste} de la reponse par leur rendu.
 
     A appeler a l'AFFICHAGE, pas avant de ranger la reponse dans l'historique :
-    le modele doit relire ses propres champs, pas des lignes deja dessinees."""
-    if not texte:
+    le modele doit relire ses propres champs, pas des lignes deja dessinees.
+
+    `key` est la personnalite active : ce rendu ne concerne QU'Agile en Seine et
+    ne doit pas toucher aux reponses des autres. Applique a tout le monde, il
+    mangeait une grille de morpion - " 1 | 2 | 3" a deux barres, donc prise pour
+    une session et redessinee en "1 2" puis "3" (vu a l'ecran). Un module
+    evenementiel n'a pas a abimer le reste du terminal."""
+    if not texte or (key is not None and not is_aes_preset(key)):
         return texte
     texte = _LISTE_RE.sub(_rendre_liste, _FICHE_RE.sub(_rendre_fiche, texte))
     # Apres les blocs : ce qui reste avec des barres n'a pas ete encadre. Les
@@ -496,6 +585,10 @@ GABARIT_INSTRUCTIONS = (
     "\nMar. 22 - 15:00-15:45 | Amphi Berlioz | Le titre de la session | avec: Prenom Nom, Autre Nom"
     "\nMer. 23 - 16:00-16:45 | Salle Ravel | Le titre de la suivante"
     "\n{/liste}"
+    "\n\nLes titres se recopient ENTIERS, jamais abreges ni suivis de points "
+    "de suspension : le terminal replie tout seul ce qui depasse, sur deux "
+    "lignes s'il le faut. Un titre ampute ne se reconnait plus sur le "
+    "programme affiche dans le hall."
     "\n\nN'invente pas de champ, n'en ajoute pas d'autres, et n'ecris rien "
     "d'autre a l'interieur des blocs."
 )
@@ -509,7 +602,7 @@ def prompt_note(key=None, question=""):
     que le jour, or sans l'heure "les prochaines conferences" ne veut rien dire.
     Le conteneur tourne en Europe/Paris (TZ + tzdata), donc l'heure locale EST
     l'heure de Paris."""
-    if key != PRESET_KEY and not is_question(question):
+    if not is_aes_preset(key) and not is_question(question):
         return ""
     prog = programme()
     if not prog:
@@ -520,12 +613,26 @@ def prompt_note(key=None, question=""):
                  "Si on t'en demande une, dis qu'elle arrive dans un instant et "
                  "propose de reposer la question - n'affirme JAMAIS que le "
                  "programme ne contient pas de resume.)")
+    # Date ET heure dans la MEME phrase, recalculees a chaque question. La date
+    # existe deja plus haut (date_note, appelee par load_preset), mais elle y est
+    # figee au debut de la session et separee de l'heure par tout le prompt :
+    # deux enonces distincts que le modele doit rapprocher lui-meme pour repondre
+    # "les prochaines sessions". Ici, tout est dans une seule ligne, juste
+    # au-dessus du programme, et la plus recente des deux fait autorite.
     now = datetime.now()
-    # Consignes AVANT le programme, rappel APRES : le programme fait ~75 ko
+    semaine = mg.JOURS_FR[now.weekday()]
+    jour = "1er" if now.day == 1 else str(now.day)
+    date = f"{semaine} {jour} {mg.MOIS_FR[now.month - 1]} {now.year}"
+    log.info("programme AES injecte : %d caracteres, %d sessions "
+             "(personnalite active : %r)",
+             len(prog), sum(1 for l in prog.split("\n") if _LIGNE_SESSION.match(l)),
+             key)
+    # Consignes AVANT le programme, rappel APRES : le programme fait ~86 ko
     # (les descriptions entieres), et une consigne posee derriere un tel pave
     # se fait oublier - le modele reprenait la forme du gabarit sans le bloc.
-    return (f"\n\n[Information systeme] Il est {now.hour}h{now.minute:02d}, "
-            f"heure de Paris."
+    return (f"\n\n[Information systeme] Nous sommes le {date} et il est "
+            f"{now.hour:02d}h{now.minute:02d}, heure de Paris. C'est cette "
+            "date et cette heure qui servent a dire ce qui vient ensuite."
             + LECTURE_INSTRUCTIONS + GABARIT_INSTRUCTIONS
             + "\n\nPROGRAMME OFFICIEL DE LA CONFERENCE (il fait autorite, "
               "c'est ta seule source sur les sessions) :\n" + prog
