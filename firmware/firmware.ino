@@ -487,6 +487,13 @@ void demarrerConnexion(const char* ssid, const char* pass) {
   WiFi.disconnect(true);            // true = radio coupee
   delay(100);                       // laisser la pile se ranger
   WiFi.mode(WIFI_STA);              // la radio revient en station
+  // ... et il faut LUI LAISSER LE TEMPS. L'arret ci-dessus coupe l'etage
+  // radio ; au rallumage il se recalibre, et un WiFi.begin() lance dans la
+  // foulee tombe par intermittence en "association expiree" (raison 4), a tous
+  // les niveaux de signal - constate a -35 dBm comme a -60, sur un partage de
+  // connexion comme sur une borne. La pause d'origine etait APRES l'arret, la
+  // ou elle ne servait a rien ; c'est apres le rallumage qu'elle compte.
+  delay(250);
   derniereRaisonWifi = 0;           // APRES l'arret : notre propre depart ne compte pas
   // Le NOM, rien que le nom : c'est la carte qui choisit sa borne. Une version
   // precedente visait la meilleure borne du scan par son identifiant materiel
