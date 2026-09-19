@@ -407,9 +407,24 @@ void checkResetButton() {
 // dizaines de secondes, largement au-dela de FORCE_MODE_WINDOW_MS sinon).
 void idleTick() { updateStatusLed(); checkResetButton(); maybeForceModePeriInformatique(); delay(5); }
 
-bool tryConnect(const char* ssid, const char* pass, unsigned long timeoutMs) {
-  WiFi.disconnect();
+// Arret FRANC avant toute nouvelle tentative. WiFi.disconnect() sans argument
+// ne coupe qu'une connexion ETABLIE : si la precedente tentative est encore en
+// cours - ce qui arrive des que WIFI_TRY_MS expire avant que la pile n'ait
+// termine - le pilote refuse la nouvelle configuration ("E wifi:sta is
+// connecting, cannot set config") et le WiFi.begin() qui suit est IGNORE en
+// silence. Le reseau suivant de la liste n'etait alors jamais essaye : il
+// echouait seulement au bout de son delai. Couper la radio annule la tentative
+// en cours ; c'est deja ce que fait scanNets() avant de scanner.
+void demarrerConnexion(const char* ssid, const char* pass) {
+  WiFi.disconnect(true);            // true = radio coupee
+  delay(100);                       // laisser la pile se ranger
+  WiFi.mode(WIFI_STA);              // la radio revient en station
   WiFi.begin(ssid, pass);
+}
+
+
+bool tryConnect(const char* ssid, const char* pass, unsigned long timeoutMs) {
+  demarrerConnexion(ssid, pass);
   unsigned long t0 = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - t0 < timeoutMs && !setupRequested) {
     idleTick();
@@ -737,8 +752,7 @@ void loop() {
       // explicitement avant d'envisager le redemarrage.
       wifiRetried = true;
       Serial.println("[WiFi] 30 s sans reseau -> relance de la connexion");
-      WiFi.disconnect();
-      WiFi.begin(usedSsid.c_str(), usedPass.c_str());
+      demarrerConnexion(usedSsid.c_str(), usedPass.c_str());
     } else if (millis() - wifiDownSince > 120000) {
       // Le redemarrage refait le tour complet de la liste, ce que la relance
       // ci-dessus ne fait pas : c'est ainsi qu'on bascule sur le reseau de
