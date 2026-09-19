@@ -898,6 +898,52 @@ def _col_width_after(s, start_width=1):
     return col_width
 
 
+# Hauteur de caractere. La distinction n'est PAS celle de
+# _COLUMN_WIDTH_BY_SIZE_BYTE, qui compte des colonnes : la double largeur
+# (0x4E) est large sans etre haute, et la double hauteur seule (0x4D) est
+# haute sans etre large. Une rangee de plus ne se prend pas a droite comme
+# une colonne, elle se prend AU-DESSUS (cf. reserve_rangee_double_hauteur).
+_ROW_HEIGHT_BY_SIZE_BYTE = {0x4C: 1, 0x4D: 2, 0x4E: 1, 0x4F: 2}
+
+
+def _row_height_after(s, start_height=1):
+    """Etat de hauteur (1 ou 2 rangees) juste apres `s`, en partant de
+    `start_height` : meme propagation d'une ligne a l'autre que
+    _col_width_after, pour un {grand} laisse ouvert."""
+    i, height = 0, start_height
+    while i < len(s):
+        if s[i] == chr(ESC) and i + 1 < len(s):
+            b = ord(s[i + 1])
+            if b in _ROW_HEIGHT_BY_SIZE_BYTE:
+                height = _ROW_HEIGHT_BY_SIZE_BYTE[b]
+            i += 2
+            continue
+        i += 1
+    return height
+
+
+def _porte_du_double_hauteur(line, start_height=1):
+    """Vrai si `line` affiche REELLEMENT quelque chose en double hauteur.
+
+    On ne peut pas se contenter de l'etat de fin de ligne : "{grand}X{/}"
+    se termine en taille normale mais a bien dessine haut. On ne peut pas
+    non plus se contenter de reperer le code : une espace en double hauteur
+    ne peint rien sur le fond noir et ne justifie pas de degager une rangee.
+    On cherche donc un caractere visible pendant que la hauteur vaut 2."""
+    i, height = 0, start_height
+    while i < len(line):
+        if line[i] == chr(ESC) and i + 1 < len(line):
+            b = ord(line[i + 1])
+            if b in _ROW_HEIGHT_BY_SIZE_BYTE:
+                height = _ROW_HEIGHT_BY_SIZE_BYTE[b]
+            i += 2
+            continue
+        if height == 2 and not line[i].isspace():
+            return True
+        i += 1
+    return False
+
+
 def visible_truncate(s, width, start_width=1):
     """Tronque a `width` COLONNES affichees (double largeur = 2 colonnes),
     en preservant les sequences ESC+octet rencontrees en cours de route
@@ -1017,6 +1063,40 @@ def wrap(text, width=COLS):
             out.append(cur)
     # La sentinelle redevient une espace ordinaire une fois le decoupage fait.
     return [ln.replace(NBSP_MARK, " ") for ln in out]
+
+
+def reserve_rangee_double_hauteur(lines):
+    """Insere une ligne vide AVANT chaque ligne affichee en double hauteur.
+
+    Sur Videotex, un caractere en double hauteur est dessine avec la rangee
+    du curseur pour moitie BASSE : sa moitie haute deborde sur la rangee du
+    dessus et l'efface. Vu sur le vrai Minitel, avec un {grand} place au fil
+    d'une phrase - "... ou jeux video ? Ou peut-etre tester un petit
+    {grand}WARGAMES{/} ?" : les 8 caracteres de WARGAMES, larges de 16
+    colonnes, avaient mange les colonnes 7 a 22 de la ligne du dessus, qui
+    se lisait "ou jeu" ... "t-etre tester un", amputee de "x video ? Ou peu".
+
+    Le pendant en largeur est traite de longue date (_COLUMN_WIDTH_BY_SIZE_BYTE,
+    bound_double_size) ; la hauteur ne l'etait pas. Et comme pour le reste du
+    balisage, on ne compte pas sur le modele pour poser ses titres sur une
+    ligne degagee (cf. strip_markdown, bound_double_size) : on degage la
+    rangee nous-memes.
+
+    Deux lignes hautes qui se suivent sont separees pour la meme raison : la
+    moitie haute de la seconde mangerait la moitie basse de la premiere. Une
+    ligne haute en tete de texte n'a rien au-dessus d'elle, on ne lui ajoute
+    donc rien - et paginate_lines mange de toute facon les lignes vides en
+    haut de page.
+
+    Ne touche pas au texte, seulement a la mise en page."""
+    out = []
+    height = 1
+    for line in lines:
+        if _porte_du_double_hauteur(line, height) and out and out[-1].strip():
+            out.append("")
+        out.append(line)
+        height = _row_height_after(line, height)
+    return out
 
 
 # ── Écrans ───────────────────────────────────────────────────────────────
@@ -1175,7 +1255,7 @@ def show_response(t, text: str, start_at_last=False):
     et attend une touche meme sur la derniere page, contrairement au mode
     normal qui rend la main directement (SUITE y vaut alors "terminer la
     revision")."""
-    lines = wrap(text)
+    lines = reserve_rangee_double_hauteur(wrap(text))
     pages = paginate_lines(lines)
     pidx = max(0, len(pages) - 2) if start_at_last else 0
     while True:
