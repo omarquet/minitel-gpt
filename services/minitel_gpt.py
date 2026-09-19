@@ -104,7 +104,7 @@ CONTENT_ROWS = 18          # lignes de contenu par page de réponse
 # question de plus de 38 caractères fait défiler la première ligne de la
 # réponse - déjà lue à ce stade.
 PIED_DE_PAGE = 2
-IDLE_TIMEOUT = 300         # 5 min → retour sommaire
+IDLE_TIMEOUT = 240         # 4 min → retour sommaire
 
 # ── Fournisseur d'IA (LLM) ───────────────────────────────────────────────
 # Fournisseur ("mistral" par defaut, "claude" ou "gemini"), cle et modele.
