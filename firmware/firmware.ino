@@ -467,14 +467,23 @@ const char* raisonWifi(uint8_t r) {
 }
 
 
-// Arret FRANC avant toute nouvelle tentative. WiFi.disconnect() sans argument
-// ne coupe qu'une connexion ETABLIE : si la precedente tentative est encore en
-// cours - ce qui arrive des que WIFI_TRY_MS expire avant que la pile n'ait
-// termine - le pilote refuse la nouvelle configuration ("E wifi:sta is
-// connecting, cannot set config") et le WiFi.begin() qui suit est IGNORE en
-// silence. Le reseau suivant de la liste n'etait alors jamais essaye : il
-// echouait seulement au bout de son delai. Couper la radio annule la tentative
-// en cours ; c'est deja ce que fait scanNets() avant de scanner.
+// Annuler la tentative precedente SANS couper la radio. Il faut bien l'annuler :
+// si elle est encore en cours - ce qui arrive des que WIFI_TRY_MS expire avant
+// que la pile n'ait termine - le pilote refuse la nouvelle configuration
+// ("E wifi:sta is connecting, cannot set config") et le WiFi.begin() qui suit
+// est IGNORE en silence ; le reseau suivant de la liste n'etait alors jamais
+// essaye. Mais esp_wifi_disconnect() suffit a cela : c'est ce que fait
+// WiFi.disconnect(false).
+//
+// La version precedente coupait la radio (disconnect(true)). Trop brutal :
+// scanNets() vient deja de l'eteindre pour scanner, et le PREMIER essai qui
+// suit - donc apres deux extinctions coup sur coup - echouait par
+// intermittence en "association expiree" (raison 4), y compris a -35 dBm,
+// pendant que le second essai passait. Ce qui manquait n'etait pas la
+// brutalite mais le temps de se ranger.
+//
+// A surveiller si ce message reapparait dans le log : la pause de 250 ms
+// ci-dessous serait alors trop courte pour annuler proprement.
 // Ce reseau figure-t-il dans le dernier scan, et est-il assez recent pour
 // qu'on s'y fie ? Retourne son index, ou -1.
 int indexScan(const char* ssid) {
@@ -486,16 +495,9 @@ int indexScan(const char* ssid) {
 
 
 void demarrerConnexion(const char* ssid, const char* pass) {
-  WiFi.disconnect(true);            // true = radio coupee
-  delay(100);                       // laisser la pile se ranger
-  WiFi.mode(WIFI_STA);              // la radio revient en station
-  // ... et il faut LUI LAISSER LE TEMPS. L'arret ci-dessus coupe l'etage
-  // radio ; au rallumage il se recalibre, et un WiFi.begin() lance dans la
-  // foulee tombe par intermittence en "association expiree" (raison 4), a tous
-  // les niveaux de signal - constate a -35 dBm comme a -60, sur un partage de
-  // connexion comme sur une borne. La pause d'origine etait APRES l'arret, la
-  // ou elle ne servait a rien ; c'est apres le rallumage qu'elle compte.
-  delay(250);
+  WiFi.mode(WIFI_STA);              // deja le cas en general : sans effet
+  WiFi.disconnect(false);           // false = la radio RESTE allumee
+  delay(250);                       // laisser la pile se ranger avant de reconfigurer
   derniereRaisonWifi = 0;           // APRES l'arret : notre propre depart ne compte pas
   // Le NOM, rien que le nom : c'est la carte qui choisit sa borne. Une version
   // precedente visait la meilleure borne du scan par son identifiant materiel
