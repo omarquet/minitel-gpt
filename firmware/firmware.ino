@@ -216,11 +216,13 @@ void forcerModePeriInformatique() {
 // Un seul envoi ferait reposer tout le mecanisme sur un delai devine : le
 // Minitel peut encore etre en train de demarrer lui-meme (sortie de veille,
 // reset interne) au moment ou l'ESP32 envoie sa toute premiere sequence,
-// qui serait alors perdue en silence. On la repete donc pendant quelques
-// secondes plutot que de parier sur un seul instant - inoffensif si le
-// Minitel a deja bascule, ca ne fait que reaffirmer le meme aiguillage.
-#define FORCE_MODE_WINDOW_MS 5000   // duree totale des tentatives apres le boot
-#define FORCE_MODE_PERIOD_MS 500    // intervalle entre deux tentatives
+// qui serait alors perdue en silence. On la repete donc pendant une vingtaine
+// de secondes plutot que de parier sur un seul instant - inoffensif si le
+// Minitel a deja bascule, ca ne fait que reaffirmer le meme aiguillage. La
+// fenetre est large parce que le Minitel peut sortir de veille bien apres
+// l'ESP32 : mieux vaut insister trop longtemps que rater le reveil.
+#define FORCE_MODE_WINDOW_MS 20000  // duree totale des tentatives apres le boot
+#define FORCE_MODE_PERIOD_MS 1000   // intervalle entre deux tentatives
 static unsigned long forceModeUntilMs = 0;
 static unsigned long lastForceModeMs = 0;
 
