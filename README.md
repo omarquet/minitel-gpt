@@ -19,6 +19,16 @@ l'écran, à 1200 bauds. Le fournisseur, la clé et le modèle se règlent depui
 l'interface web, tout comme la personnalité de l'assistant (la version phare
 est « bloquée dans les années 80 »).
 
+Deux pages viennent avec :
+
+- **[La dictée vocale](#dicter-depuis-un-téléphone)** (`/dictee`) - on parle
+  dans son téléphone, ça s'écrit sur le Minitel. Le clavier de 1982 reste sous
+  les doigts de celui qui veut s'y frotter, et les autres dictent. Effet
+  garanti.
+- **[L'émulateur](#tester-sans-matériel)** (`/minitel.html`) - un Minitel
+  complet dans le navigateur, même protocole que le vrai. De quoi tout essayer
+  pendant que le tien attend encore son fer à souder.
+
 ---
 
 ## Déploiement
@@ -84,6 +94,12 @@ discuter avec l'assistant et consommer ta clé API. Configure `WS_TOKEN` (une
 valeur aléatoire, ex. `python3 -c "import secrets; print(secrets.token_hex(32))"`)
 pour exiger `?token=...` sur la connexion WebSocket. L'ESP32 doit alors inclure
 le même jeton dans `WS_PATH` (voir le firmware).
+
+Le même jeton protège les deux routes de données de la dictée,
+`/dictee/status` et `/dictee/inject` (403 sans lui). La **page** `/dictee`,
+elle, est servie sans jeton, volontairement : l'exiger le laisserait dans
+l'URL, donc dans l'historique du téléphone. Elle ne contient aucun secret et
+ne sert à rien sans jeton.
 
 L'écran affiché sur la touche **GUIDE** ne montre que l'URL de l'admin, jamais
 le mot de passe (contrairement au Pi d'origine, où seul le foyer avait un
