@@ -46,6 +46,36 @@ navigateur qui parle le même protocole WebSocket binaire que l'ESP32 (rendu
 Vidéotex 40 colonnes, boutons pour les touches de fonction). L'URL WebSocket
 et le jeton (`WS_TOKEN`) sont saisissables dans l'interface.
 
+C'est le seul moyen d'essayer le serveur complet - personnalités, pagination,
+touches de fonction - sans Minitel, sans ESP32 et sans la moindre soudure. Il
+sert aussi à vérifier un déploiement avant de brancher le matériel.
+
+## Dicter depuis un téléphone
+
+Ouvre `https://<ton-domaine>/dictee` : une page pensée pour Safari sur iPhone,
+qui écrit sur le Minitel **dans la session en cours**. Le clavier d'un Minitel
+est lent et déroutant pour qui ne l'a jamais pratiqué ; là, le visiteur dicte
+au micro du clavier natif de son téléphone et le texte s'affiche sur l'écran du
+Minitel, caractère par caractère, comme s'il avait été tapé.
+
+Deux modes : **Direct**, où le texte part au fil de la dictée, et **Valider**,
+où l'on se relit avant d'envoyer. Les boutons `ENVOI` et `Effacer` reproduisent
+les touches correspondantes.
+
+Le téléphone ne se connecte pas à `/ws` - il ouvrirait une deuxième
+conversation au lieu d'écrire dans celle du Minitel. Il passe par
+`/dictee/inject`, qui dépose les caractères dans la session existante. Deux
+conséquences à connaître :
+
+- il faut **une session Minitel ouverte** ; sans elle, la page le dit et
+  n'envoie rien ;
+- ce qui est dicté pendant la lecture d'une réponse **attend son tour**, les
+  caractères n'étant consommés que lorsque le terminal attend une question.
+
+Le jeton (`WS_TOKEN`) se saisit une fois et reste dans le `localStorage` du
+téléphone : la page est faite pour passer de main en main, le jeton n'y est
+affiché nulle part. Un bouton permet de l'oublier.
+
 ## Sécurité
 
 `/ws` (et les endpoints de test `/ws-echo`, `/ws-gemini`) n'ont **aucune
@@ -181,6 +211,7 @@ firmware/
   firmware.ino          pont UART <-> WebSocket (sketch Arduino)
   secrets.h.example     modèle de secrets.h (WiFi + token WS, non versionné)
 minitel.html             émulateur Minitel dans le navigateur (test sans matériel)
+dictee.html              page de dictée vocale depuis un téléphone (servie sur /dictee)
 Dockerfile, docker-compose.yml, entrypoint.sh
 DEPLOY.md                procédure de déploiement
 ```
