@@ -534,6 +534,10 @@ const char* raisonWifi(uint8_t r) {
 // entier a viser dans le vide.
 // Ce reseau figure-t-il dans le dernier scan, et est-il assez recent pour
 // qu'on s'y fie ? Retourne son index, ou -1.
+#define ARRET_WIFI_PLANCHER_MS 250  // duree mini avant de reconfigurer
+#define ARRET_WIFI_COURT_MS 300    // station probablement deja au repos
+#define ARRET_WIFI_LONG_MS  2000   // apres un refus avere : on attend vraiment
+
 // Attendre que l'arret demande a la pile soit acte, au plus `maxMs`. Rend la
 // main des l'evenement recu. idleTick() garde la LED, le bouton et
 // l'aiguillage en vie pendant ce temps.
@@ -548,9 +552,6 @@ static void attendreArretWifi(unsigned long maxMs) {
   while (millis() - t0 < ARRET_WIFI_PLANCHER_MS) idleTick();
 }
 
-#define ARRET_WIFI_PLANCHER_MS 250  // duree mini avant de reconfigurer
-#define ARRET_WIFI_COURT_MS 300    // station probablement deja au repos
-#define ARRET_WIFI_LONG_MS  2000   // apres un refus avere : on attend vraiment
 
 
 int indexScan(const char* ssid) {
