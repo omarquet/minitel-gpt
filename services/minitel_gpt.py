@@ -69,6 +69,62 @@ NBSP_MARK = "\x02"
 _FR_PUNCT_RE = re.compile(r"[ \t]+([?!:;])")
 
 
+# Une grille dessinee SANS {art}. Le modele n'emploie pas toujours la balise -
+# vu a l'ecran sur une partie de morpion : "  | X |" affiche "| X |" et
+# "  |   | X" affiche "| | X", cases vides ecrasees, colonnes decalees par
+# rapport aux separateurs, grille illisible. wrap() fait un para.split() : tout
+# groupe d'espaces devient une espace unique, et l'alignement d'un dessin ne
+# survit pas. C'est deja la raison d'etre de {art} ; il manquait seulement de
+# ne pas dependre du modele pour la poser, comme ailleurs dans ce fichier
+# (cf. bound_double_size, strip_markdown).
+#
+# On encadre donc les grilles nues avant les substitutions Markdown : le reste
+# du trajet est celui, deja eprouve, d'un bloc {art} ecrit a la main.
+_GRILLE_SEP_RE = re.compile(r"^[-+#=_|\s]*[-+#=]{3,}[-+#=_|\s]*$")
+
+
+def _est_rangee_grille(ln):
+    """Une rangee de cellules : au moins deux barres verticales."""
+    return ln.count("|") >= 2
+
+
+def _est_separateur_grille(ln):
+    """Une ligne de separation : que des traits, croix et barres."""
+    return bool(ln.strip()) and bool(_GRILLE_SEP_RE.match(ln))
+
+
+def _encadrer_grilles(segment: str) -> str:
+    lignes = segment.split("\n")
+    out, i, n = [], 0, len(lignes)
+    while i < n:
+        j = i
+        while j < n and (_est_rangee_grille(lignes[j]) or _est_separateur_grille(lignes[j])):
+            j += 1
+        # Une suite de traits seule (barre de separation, tiret de dialogue)
+        # n'est pas une grille : il faut au moins une rangee de cellules.
+        if j > i and any(_est_rangee_grille(l) for l in lignes[i:j]):
+            out.append("{art}")
+            out.extend(lignes[i:j])
+            out.append("{/art}")
+            i = j
+        else:
+            out.append(lignes[i])
+            i += 1
+    return "\n".join(out)
+
+
+def _proteger_grilles(s: str) -> str:
+    """Encadre en {art} les grilles que le modele a laissees nues, sans
+    toucher aux blocs {art} qu'il a bien balises."""
+    out, pos = [], 0
+    for m in _ART_RE.finditer(s):
+        out.append(_encadrer_grilles(s[pos:m.start()]))
+        out.append(m.group(0))                 # deja protege : recopie tel quel
+        pos = m.end()
+    out.append(_encadrer_grilles(s[pos:]))
+    return "".join(out)
+
+
 def _mark_art_lines(block: str) -> str:
     return "\n".join(ART_MARK + ln for ln in block.split("\n"))
 
@@ -76,6 +132,9 @@ def _mark_art_lines(block: str) -> str:
 def strip_markdown(s: str) -> str:
     if not s:
         return s
+    # Une grille dessinee sans balise est d'abord encadree, pour suivre
+    # ensuite exactement le chemin d'un bloc {art} ecrit a la main.
+    s = _proteger_grilles(s)
     # Les blocs {art} sont mis de cote avant les substitutions Markdown.
     blocks = []
 
