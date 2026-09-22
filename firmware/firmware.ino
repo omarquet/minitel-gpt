@@ -850,14 +850,21 @@ bool connectKnown() {
     // de portee et coutaient 24 s a chaque demarrage. Un reseau absent du scan
     // reste essaye, mais brievement : il peut etre a SSID cache.
     if (millis() - scanDate > SCAN_FRAIS_MS || !scanDate) scanNets();
-    for (uint8_t i = 0; i < KNOWN_COUNT; i++) {
-      bool vu = indexScan(KNOWN_NETS[i].ssid) >= 0;
-      Serial.printf("[WiFi] essai %u/%u : %s%s\n", i + 1, KNOWN_COUNT,
-                    KNOWN_NETS[i].ssid, vu ? "" : " (absent du scan, essai bref)");
-      if (tryConnect(KNOWN_NETS[i].ssid, KNOWN_NETS[i].pass,
-                     vu ? WIFI_TRY_MS : WIFI_TRY_ABSENT_MS)) return true;
-      Serial.printf(" -> echec : %s (raison %u)\n",
-                    raisonWifi(derniereRaisonWifi), derniereRaisonWifi);
+    // Les reseaux PRESENTS d'abord, les absents ensuite - l'ordre de
+    // secrets.h ne decide plus de rien. En conference, les deux reseaux de la
+    // maison etaient en tete de liste et passaient avant celui de la salle,
+    // pourtant le seul a portee : deux echecs avant d'essayer le bon.
+    for (uint8_t tour = 0; tour < 2; tour++) {
+      for (uint8_t i = 0; i < KNOWN_COUNT; i++) {
+        bool vu = indexScan(KNOWN_NETS[i].ssid) >= 0;
+        if (vu != (tour == 0)) continue;
+        Serial.printf("[WiFi] essai : %s%s\n",
+                      KNOWN_NETS[i].ssid, vu ? "" : " (absent du scan, essai bref)");
+        if (tryConnect(KNOWN_NETS[i].ssid, KNOWN_NETS[i].pass,
+                       vu ? WIFI_TRY_MS : WIFI_TRY_ABSENT_MS)) return true;
+        Serial.printf(" -> echec : %s (raison %u)\n",
+                      raisonWifi(derniereRaisonWifi), derniereRaisonWifi);
+      }
     }
   }
   return false;
