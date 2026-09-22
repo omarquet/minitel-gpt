@@ -581,8 +581,30 @@ void demarrerConnexion(const char* ssid, const char* pass) {
   // PRECEDENT, sous le nom du suivant.
   Serial.println("[WiFi] configuration refusee (pile encore occupee), on attend l'arret");
   attendreArretWifi(ARRET_WIFI_LONG_MS);
+  if (WiFi.begin(ssid, pass) != WL_CONNECT_FAILED) return;
+
+  // Deuxieme refus : la pile ne se rangera pas toute seule, il ne sert a rien
+  // de lui laisser plus de temps. Vu en conference, au log : apres un premier
+  // essai en "authentification expiree", les essais 2 ET 3 se sont fait
+  // refuser deux fois chacun. Seul le premier avait reellement emis ; les deux
+  // autres n'ont jamais atteint leur reseau, et le terminal restait hors ligne
+  // alors qu'un des trois aurait repondu.
+  //
+  // esp_wifi_disconnect() - WiFi.disconnect(false) - n'extrait pas une station
+  // coincee en pleine poignee de main. Couper la radio, si : c'est pour ca que
+  // b2d1a8c l'avait mis, et le retirer (5044de6) a ramene la panne. Elle reste
+  // reservee a ce cas, le chemin doux suffisant pour un enchainement normal.
+  Serial.println("[WiFi] refusee deux fois -> coupure de la radio");
+  arretWifiConfirme = false;
+  WiFi.disconnect(true);            // true = radio coupee : annule la tentative
+  attendreArretWifi(ARRET_WIFI_LONG_MS);
+  WiFi.mode(WIFI_STA);              // la radio revient en station
+  // Au rallumage l'etage radio se recalibre : lui laisser le meme plancher
+  // qu'apres un arret, sinon le begin() qui suit part dans la foulee.
+  unsigned long t0 = millis();
+  while (millis() - t0 < ARRET_WIFI_PLANCHER_MS) idleTick();
   if (WiFi.begin(ssid, pass) == WL_CONNECT_FAILED)
-    Serial.println("[WiFi] configuration refusee deux fois : cet essai est perdu");
+    Serial.println("[WiFi] refusee jusqu'apres la coupure : cet essai est perdu");
 }
 
 
