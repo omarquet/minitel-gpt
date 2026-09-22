@@ -469,6 +469,10 @@ void idleTick() {
 // de deconnexion.
 static volatile uint8_t derniereRaisonWifi = 0;
 
+// Notre propre arret a-t-il ete acte par la pile ? Pose par l'evenement de
+// deconnexion, attendu par demarrerConnexion() avant de reconfigurer.
+static volatile bool arretWifiConfirme = false;
+
 void onWifiEvent(WiFiEvent_t evt, WiFiEventInfo_t info) {
   if (evt != ARDUINO_EVENT_WIFI_STA_DISCONNECTED) return;
   uint8_t r = info.wifi_sta_disconnected.reason;
@@ -476,7 +480,10 @@ void onWifiEvent(WiFiEvent_t evt, WiFiEventInfo_t info) {
   // WiFi.disconnect() pose avant chaque tentative emet cet evenement. Le
   // retenir affichait notre propre depart comme si la box avait refuse -
   // "raison 36" sur deux essais de suite, alors qu'aucun refus n'etait venu.
-  if (r == WIFI_REASON_STA_LEAVING || r == WIFI_REASON_ASSOC_LEAVE) return;
+  if (r == WIFI_REASON_STA_LEAVING || r == WIFI_REASON_ASSOC_LEAVE) {
+    arretWifiConfirme = true;   // c'est le signal qu'attend demarrerConnexion()
+    return;
+  }
   derniereRaisonWifi = r;
 }
 
@@ -512,10 +519,33 @@ const char* raisonWifi(uint8_t r) {
 // pendant que le second essai passait. Ce qui manquait n'etait pas la
 // brutalite mais le temps de se ranger.
 //
-// A surveiller si ce message reapparait dans le log : la pause de 250 ms
-// ci-dessous serait alors trop courte pour annuler proprement.
+// Le message a fini par reapparaitre, sur un demarrage ou les essais 2 et 3
+// ont ete refuses coup sur coup (16 225 ms et 20 483 ms au log) : la pause
+// fixe de 250 ms etait bel et bien trop courte. On n'en devine donc plus la
+// duree - c'est le troisieme delai qu'on aurait devine, apres les deux
+// racontes ci-dessus. On attend le signal que la pile emet elle-meme quand
+// l'arret est acte (STA_LEAVING / ASSOC_LEAVE, cf. onWifiEvent), avec un
+// plafond pour le cas ou il ne vient pas - une station deja au repos n'a
+// rien a annoncer, et l'attente se termine alors sur le plafond court.
+//
+// Et surtout, on regarde ce que repond WiFi.begin() : c'est ce test qui
+// supprime vraiment la panne. Meme si l'attente se revelait un jour trop
+// courte, le refus devient visible et rattrapable au lieu de couter un essai
+// entier a viser dans le vide.
 // Ce reseau figure-t-il dans le dernier scan, et est-il assez recent pour
 // qu'on s'y fie ? Retourne son index, ou -1.
+// Attendre que l'arret demande a la pile soit acte, au plus `maxMs`. Rend la
+// main des l'evenement recu. idleTick() garde la LED, le bouton et
+// l'aiguillage en vie pendant ce temps.
+static void attendreArretWifi(unsigned long maxMs) {
+  unsigned long t0 = millis();
+  while (!arretWifiConfirme && millis() - t0 < maxMs) idleTick();
+}
+
+#define ARRET_WIFI_COURT_MS 300    // station probablement deja au repos
+#define ARRET_WIFI_LONG_MS  2000   // apres un refus avere : on attend vraiment
+
+
 int indexScan(const char* ssid) {
   if (!scanDate || millis() - scanDate > SCAN_FRAIS_MS) return -1;
   for (uint8_t i = 0; i < netCount; i++)
@@ -526,8 +556,9 @@ int indexScan(const char* ssid) {
 
 void demarrerConnexion(const char* ssid, const char* pass) {
   WiFi.mode(WIFI_STA);              // deja le cas en general : sans effet
+  arretWifiConfirme = false;        // AVANT l'arret, sinon on lit celui d'avant
   WiFi.disconnect(false);           // false = la radio RESTE allumee
-  delay(250);                       // laisser la pile se ranger avant de reconfigurer
+  attendreArretWifi(ARRET_WIFI_COURT_MS);
   derniereRaisonWifi = 0;           // APRES l'arret : notre propre depart ne compte pas
   // Le NOM, rien que le nom : c'est la carte qui choisit sa borne. Une version
   // precedente visait la meilleure borne du scan par son identifiant materiel
@@ -535,7 +566,15 @@ void demarrerConnexion(const char* ssid, const char* pass) {
   // reseau maille. Mauvaise idee : viser une borne, c'est s'interdire toutes
   // les autres, et la pile repondait "reseau introuvable" au lieu d'essayer la
   // suivante. C'est le travail du pilote, pas le notre.
-  WiFi.begin(ssid, pass);
+  if (WiFi.begin(ssid, pass) != WL_CONNECT_FAILED) return;
+
+  // Refus : la pile n'avait pas fini de se ranger. Sans ce rattrapage, le
+  // begin() etait perdu et l'essai brulait ses 4 a 12 s sur le reseau
+  // PRECEDENT, sous le nom du suivant.
+  Serial.println("[WiFi] configuration refusee (pile encore occupee), on attend l'arret");
+  attendreArretWifi(ARRET_WIFI_LONG_MS);
+  if (WiFi.begin(ssid, pass) == WL_CONNECT_FAILED)
+    Serial.println("[WiFi] configuration refusee deux fois : cet essai est perdu");
 }
 
 
