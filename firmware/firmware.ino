@@ -540,8 +540,15 @@ const char* raisonWifi(uint8_t r) {
 static void attendreArretWifi(unsigned long maxMs) {
   unsigned long t0 = millis();
   while (!arretWifiConfirme && millis() - t0 < maxMs) idleTick();
+  // Plancher. L'evenement peut arriver en quelques millisecondes, or ce n'est
+  // pas l'annonce de l'arret qui manquait historiquement mais le temps de se
+  // ranger : le premier essai suit scanNets(), qui vient de couper la radio,
+  // et partait en "association expiree" quand on le lancait trop tot. Sortir
+  // au signal sans plancher supprimait la pause de 250 ms qui le protegeait.
+  while (millis() - t0 < ARRET_WIFI_PLANCHER_MS) idleTick();
 }
 
+#define ARRET_WIFI_PLANCHER_MS 250  // duree mini avant de reconfigurer
 #define ARRET_WIFI_COURT_MS 300    // station probablement deja au repos
 #define ARRET_WIFI_LONG_MS  2000   // apres un refus avere : on attend vraiment
 
